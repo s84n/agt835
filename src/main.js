@@ -82,7 +82,7 @@ const audio = new EngineAudio();
 const tick = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 const progress = (p) => ($('#progress-bar').style.width = `${Math.round(p * 100)}%`);
 
-let atm, grass, parts, ctrl, hotspots, obstacles = [];
+let atm, grass, parts, ctrl, hotspots, orchardLod, obstacles = [];
 const STAGE_HEADING = 1.2;
 const G0 = heightAt(0, 0); // Bodenhöhe der Bühne
 const DEFAULT_TARGET = new THREE.Vector3(0, G0 + 0.95, 0);
@@ -100,6 +100,7 @@ async function build() {
   progress(0.35); await tick();
   const orchard = createOrchard(Q);
   scene.add(orchard.group);
+  orchardLod = orchard.lod;
   obstacles.push(...orchard.obstacles);
   const wood = createWoodpile(-11, -9, 0.9);
   scene.add(wood.group);
@@ -483,6 +484,28 @@ function wireUI() {
   setupTouch();
 }
 
+// ---------- Adaptive Auflösung ----------
+// Misst die Bildzeit und passt die Renderauflösung an, damit schwächere Geräte flüssig bleiben.
+const MAX_DPR = Math.min(devicePixelRatio, Q.dpr);
+const MIN_DPR = Math.min(0.75, MAX_DPR);
+let curDpr = MAX_DPR, ftSum = 0, ftN = 0, ftCool = 0;
+function setDpr(d) {
+  curDpr = d;
+  renderer.setPixelRatio(d);
+  composer.setPixelRatio(d);
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+}
+function adaptResolution(rawDt) {
+  if (document.hidden || mode === 'loading' || mode === 'ready' || params.has('fast')) return;
+  ftSum += rawDt; ftN++;
+  ftCool -= rawDt;
+  if (ftN < 60 || ftCool > 0) return;
+  const avg = ftSum / ftN; ftSum = 0; ftN = 0;
+  if (avg > 1 / 45 && curDpr > MIN_DPR) { setDpr(Math.max(MIN_DPR, +(curDpr - 0.25).toFixed(2))); ftCool = 1.5; }
+  else if (avg < 1 / 75 && curDpr < MAX_DPR) { setDpr(Math.min(MAX_DPR, +(curDpr + 0.25).toFixed(2))); ftCool = 4; }
+}
+
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
@@ -498,7 +521,9 @@ const tmpV = new THREE.Vector3();
 
 function loop(ts) {
   timer.update(ts);
-  const dt = Math.min(timer.getDelta(), 0.05);
+  const rawDt = timer.getDelta();
+  const dt = Math.min(rawDt, 0.05);
+  if (rawDt > 0 && rawDt < 0.5) adaptResolution(rawDt);
   const t = timer.getElapsed();
   frame++;
   shared.uTime.value = t;
@@ -539,7 +564,7 @@ function loop(ts) {
   if (atm && parts) {
     atm.update(t, camera, parts.root.position);
     bloom.strength = atm.state.bloom;
-    if (frame % 8 === 0) grass.update(camera);
+    if (frame % 8 === 0) { grass.update(camera); orchardLod.update(camera); }
     if (mode === 'showroom') hotspots.update(camera, tmpV.copy(parts.root.position).setY(parts.root.position.y + 1), innerWidth, innerHeight);
     const dist = camera.position.distanceTo(parts.root.position);
     const listen = mode === 'drive' ? (camMode === 1 || camMode === 2 ? 1.1 : 0.95) : Math.min(1, Math.max(0.3, 6 / dist));
@@ -570,4 +595,4 @@ function loop(ts) {
 })();
 
 // Für Debugging in der Konsole
-window.__agt = { scene, camera, audio, get ctrl() { return ctrl; }, get atm() { return atm; }, controls, enterDrive, exitDrive, focusHotspot };
+window.__agt = { scene, camera, audio, renderer, composer, get ctrl() { return ctrl; }, get atm() { return atm; }, controls, enterDrive, exitDrive, focusHotspot };

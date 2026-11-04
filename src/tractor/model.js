@@ -376,11 +376,45 @@ export function createTractor() {
 
   root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   applyGrimeToObject(root);
+  // Starre Teile je Baugruppe zusammenfassen: spart rund die Hälfte der Draw Calls
+  for (const g of [front, rear, engineShake]) mergeStatic(g);
 
   return {
     root, body, front, rear, engineShake, wheels, steeringWheel, levers, pto, hitch, lowerLinks, topLink,
     headlights, exhaust, anchors, materials: M,
   };
+}
+
+// Fasst direkte Mesh-Kinder einer Gruppe mit gleichem Material (und gleichem Schattenwurf)
+// zu je einem Mesh zusammen. Objekte mit eigenen Kindern oder Namen bleiben erhalten.
+function mergeStatic(group) {
+  const buckets = new Map();
+  for (const o of [...group.children]) {
+    if (!o.isMesh || o.isInstancedMesh || o.children.length || o.name || Array.isArray(o.material)) continue;
+    const key = `${o.material.uuid}|${o.castShadow}`;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(o);
+  }
+  for (const list of buckets.values()) {
+    if (list.length < 2) continue;
+    const geos = list.map((o) => {
+      o.updateMatrix();
+      let g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+      g.applyMatrix4(o.matrix);
+      return g;
+    });
+    // nur gemeinsame Attribute behalten, damit sich alles zusammenführen lässt
+    const common = Object.keys(geos[0].attributes).filter((k) => geos.every((g) => g.attributes[k]));
+    for (const g of geos) for (const k of Object.keys(g.attributes)) if (!common.includes(k)) g.deleteAttribute(k);
+    for (const g of geos) { g.morphAttributes = {}; g.clearGroups(); }
+    const merged = mergeGeometries(geos);
+    if (!merged) continue;
+    const m = new THREE.Mesh(merged, list[0].material);
+    m.castShadow = list[0].castShadow;
+    m.receiveShadow = true;
+    list.forEach((o) => group.remove(o));
+    group.add(m);
+  }
 }
 
 function makeAnchor(parent, x, y, z) {

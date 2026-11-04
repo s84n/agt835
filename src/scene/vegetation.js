@@ -79,6 +79,61 @@ function windMaterial(opts, strength = 0.05, pivot = 1.6, { bark = false, leaves
   return m;
 }
 
+// ---------- Performance-Helfer ----------
+// Teilt Instanzen in räumliche Kacheln auf: So kann three.js ganze Kacheln per Frustum
+// Culling aussortieren – im Kamerabild und vor allem im Schattenpass (der nur ~44 m abdeckt).
+function chunked(entries, cell, make) {
+  const cells = new Map();
+  for (const e of entries) {
+    const key = `${Math.floor(e.x / cell)},${Math.floor(e.z / cell)}`;
+    if (!cells.has(key)) cells.set(key, []);
+    cells.get(key).push(e);
+  }
+  const out = [];
+  for (const list of cells.values()) {
+    const cx = list.reduce((a, e) => a + e.x, 0) / list.length;
+    const cz = list.reduce((a, e) => a + e.z, 0) / list.length;
+    out.push({ cx, cz, meshes: make(list) });
+  }
+  return out;
+}
+
+function fillInstanced(geo, mat, list, { shadow = false, color = false } = {}) {
+  const m = new THREE.InstancedMesh(geo, mat, list.length);
+  list.forEach((e, i) => { m.setMatrixAt(i, e.m); if (color && e.c) m.setColorAt(i, e.c); });
+  m.castShadow = shadow;
+  m.receiveShadow = true;
+  m.computeBoundingSphere();
+  return m;
+}
+
+// Fernstufe für Blattkronen: nur jedes dritte Blattbüschel, dafür größer
+function reduceLeaves(geo, keepEvery = 3, grow = 1.55) {
+  const src = geo.attributes;
+  const quads = src.position.count / 6;
+  const out = { position: [], normal: [], uv: [], color: [] };
+  const c = new THREE.Vector3(), v = new THREE.Vector3();
+  for (let q = 0; q < quads; q += keepEvery) {
+    c.set(0, 0, 0);
+    for (let k = 0; k < 6; k++) c.add(v.fromBufferAttribute(src.position, q * 6 + k));
+    c.multiplyScalar(1 / 6);
+    for (let k = 0; k < 6; k++) {
+      const i = q * 6 + k;
+      v.fromBufferAttribute(src.position, i).sub(c).multiplyScalar(grow).add(c);
+      out.position.push(v.x, v.y, v.z);
+      out.normal.push(src.normal.getX(i), src.normal.getY(i), src.normal.getZ(i));
+      out.uv.push(src.uv.getX(i), src.uv.getY(i));
+      out.color.push(src.color.getX(i), src.color.getY(i), src.color.getZ(i));
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(out.position, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(out.normal, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(out.uv, 2));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(out.color, 3));
+  return g;
+}
+
 // ---------- Streuobstbäume ----------
 function setColor(geo, fn) {
   const p = geo.attributes.position, n = geo.attributes.normal;
@@ -215,33 +270,46 @@ export function createOrchard(quality) {
   const leafMap = leafTexture();
   const woodMat = windMaterial({ vertexColors: true }, 0.035, 1.8, { bark: true });
   const leafMat = windMaterial({ vertexColors: true, map: leafMap, alphaTest: 0.45, side: THREE.DoubleSide }, 0.035, 1.8, { leaves: true });
-  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
-  const per = variants.map(() => []);
-  spots.forEach((sp2, i) => per[i % variants.length].push(sp2));
-  variants.forEach((v, vi) => {
-    const list = per[vi];
-    // Krone besteht nur noch aus Blattbüscheln (keine Kugelkerne mehr)
-    const meshes = [
-      new THREE.InstancedMesh(v.wood, woodMat, list.length),
-      new THREE.InstancedMesh(v.leaves, leafMat, list.length),
-    ];
-    list.forEach(([x, z], i) => {
-      const k = 0.85 + rnd() * 0.5;
-      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rnd() * Math.PI * 2);
-      s.set(k, k * (0.9 + rnd() * 0.25), k);
-      p.set(x, heightAt(x, z) - 0.1, z);
-      m4.compose(p, q, s);
-      meshes.forEach((m) => m.setMatrixAt(i, m4));
-      obstacles.push({ x, z, r: 0.45 * k });
-    });
-    for (const m of meshes) {
-      m.castShadow = true;
-      m.receiveShadow = true;
-      m.computeBoundingSphere();
-      group.add(m);
-    }
+  const leafLow = variants.map((v) => reduceLeaves(v.leaves));
+  const q = new THREE.Quaternion(), sc = new THREE.Vector3(), p = new THREE.Vector3();
+  const entries = spots.map(([x, z], i) => {
+    const k = 0.85 + rnd() * 0.5;
+    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rnd() * Math.PI * 2);
+    sc.set(k, k * (0.9 + rnd() * 0.25), k);
+    p.set(x, heightAt(x, z) - 0.1, z);
+    obstacles.push({ x, z, r: 0.45 * k });
+    return { x, z, v: i % variants.length, m: new THREE.Matrix4().compose(p, q, sc) };
   });
-  return { group, obstacles };
+  const chunks = chunked(entries, 60, (list) => {
+    const res = { wood: [], high: [], low: [] };
+    variants.forEach((v, vi) => {
+      const sub = list.filter((e) => e.v === vi);
+      if (!sub.length) return;
+      res.wood.push(fillInstanced(v.wood, woodMat, sub, { shadow: true }));
+      res.high.push(fillInstanced(v.leaves, leafMat, sub, { shadow: true }));
+      const lo = fillInstanced(leafLow[vi], leafMat, sub);
+      lo.visible = false;
+      res.low.push(lo);
+    });
+    [...res.wood, ...res.high, ...res.low].forEach((m) => group.add(m));
+    return res;
+  });
+  // Detailstufe je Kachel nach Kameraabstand (mit Hysterese gegen Flackern)
+  const lod = {
+    near: true,
+    update(camera) {
+      for (const c of chunks) {
+        const d = Math.hypot(camera.position.x - c.cx, camera.position.z - c.cz);
+        const near = c.near ?? true;
+        const nowNear = near ? d < 95 : d < 80;
+        if (nowNear === c.near) continue;
+        c.near = nowNear;
+        c.meshes.high.forEach((m) => (m.visible = nowNear));
+        c.meshes.low.forEach((m) => (m.visible = !nowNear));
+      }
+    },
+  };
+  return { group, obstacles, lod };
 }
 
 // ---------- Wald an den Hängen ----------
@@ -292,14 +360,12 @@ export function createForest(quality) {
   const nC = Math.round(N * 0.38), nD = N - nC;
   const dGeos = [decidGeo(rnd), decidGeo(rnd)];
   const cGeo = coniferGeo(rnd);
-  const dMeshes = dGeos.map((g) => new THREE.InstancedMesh(g, mat, Math.ceil(nD / 2)));
-  const cMesh = new THREE.InstancedMesh(cGeo, mat, nC);
-  const counts = [0, 0, 0];
+  const lists = [[], [], []]; // Laub A, Laub B, Fichte
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
   const dCols = ['#4a6e2c', '#557a32', '#5f8436', '#46682a', '#6a8a38', '#7a8c3a', '#52752e'].map((c) => new THREE.Color(c));
   const cCols = ['#2a4a2c', '#2f5232', '#26442a', '#355a36'].map((c) => new THREE.Color(c));
-  let tries = 0;
-  while (counts[0] + counts[1] + counts[2] < N && tries < N * 30) {
+  let tries = 0, total = 0;
+  while (total < N && tries < N * 30) {
     tries++;
     const x = (rnd() - 0.5) * 2400, z = (rnd() - 0.5) * 2400;
     if (Math.hypot(x, z) < 160) continue;
@@ -309,27 +375,31 @@ export function createForest(quality) {
     // Fichten häufiger in höheren Lagen
     const conifer = rnd() < 0.25 + Math.min(Math.max((y - 40) / 120, 0), 1) * 0.35;
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rnd() * 6.28);
-    if (conifer && counts[2] < nC) {
+    if (conifer && lists[2].length < nC) {
       const k = 5.0 + rnd() * 3.0;
       s.set(k, k * (1.1 + rnd() * 0.35), k);
       p.set(x, y - 0.6, z);
-      cMesh.setMatrixAt(counts[2], m4.compose(p, q, s));
-      cMesh.setColorAt(counts[2]++, cCols[Math.floor(rnd() * cCols.length)]);
+      lists[2].push({ x, z, m: m4.compose(p, q, s).clone(), c: cCols[Math.floor(rnd() * cCols.length)] });
     } else {
       const i = rnd() < 0.5 ? 0 : 1;
-      if (counts[i] >= dMeshes[i].count) continue;
+      if (lists[0].length + lists[1].length >= nD) continue;
       const k = 5.5 + rnd() * 3.5;
       s.set(k * (0.9 + rnd() * 0.3), k * (0.85 + rnd() * 0.35), k * (0.9 + rnd() * 0.3));
       p.set(x, y - 0.6, z);
-      dMeshes[i].setMatrixAt(counts[i], m4.compose(p, q, s));
       const c = dCols[Math.floor(rnd() * dCols.length)].clone();
       if (rnd() < 0.03) c.set('#8a7f38'); // vereinzelt herbstliche Tupfer
-      dMeshes[i].setColorAt(counts[i]++, c);
+      lists[i].push({ x, z, m: m4.compose(p, q, s).clone(), c });
     }
+    total++;
   }
-  dMeshes.forEach((m, i) => { m.count = counts[i]; });
-  cMesh.count = counts[2];
-  for (const m of [...dMeshes, cMesh]) { m.computeBoundingSphere(); group.add(m); }
+  const geos = [dGeos[0], dGeos[1], cGeo];
+  lists.forEach((list, i) => {
+    chunked(list, 400, (sub) => {
+      const m = fillInstanced(geos[i], mat, sub, { color: true });
+      group.add(m);
+      return m;
+    });
+  });
   return group;
 }
 
