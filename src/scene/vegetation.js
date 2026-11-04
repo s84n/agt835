@@ -245,37 +245,92 @@ export function createOrchard(quality) {
 }
 
 // ---------- Wald an den Hängen ----------
+// Geometrie für ferne Waldbäume: Vertex-Farbe = Licht/Schatten-Verlauf (wird mit instanceColor multipliziert)
+function shadeByHeight(geo, y0, y1, base = 1) {
+  const g = geo.index ? geo.toNonIndexed() : geo;
+  g.deleteAttribute('uv');
+  return setColor(g, (c, x, y) => {
+    const t = Math.min(Math.max((y - y0) / (y1 - y0), 0), 1);
+    c.setScalar(base * (0.5 + 0.62 * t));
+  });
+}
+
+function decidGeo(rnd) {
+  const parts = [];
+  const trunk = new THREE.CylinderGeometry(0.07, 0.12, 0.9, 5).translate(0, 0.45, 0);
+  { const t = trunk.toNonIndexed(); t.deleteAttribute('uv'); parts.push(setColor(t, (c) => c.setRGB(0.55, 0.42, 0.3))); }
+  const blobs = [[0, 1.45, 0, 0.85], [0.5, 1.2, 0.25, 0.6], [-0.45, 1.25, -0.2, 0.62], [0.15, 1.95, -0.1, 0.55], [-0.2, 1.7, 0.45, 0.5]];
+  for (const [x, y, z, r] of blobs) {
+    const g = new THREE.IcosahedronGeometry(r, 0);
+    jitter(g, r * 0.35, rnd);
+    g.translate(x, y, z);
+    parts.push(shadeByHeight(g, 0.7, 2.4));
+  }
+  return mergeGeometries(parts);
+}
+
+function coniferGeo(rnd) {
+  const parts = [];
+  const trunk = new THREE.CylinderGeometry(0.05, 0.09, 0.8, 5).translate(0, 0.4, 0);
+  { const t = trunk.toNonIndexed(); t.deleteAttribute('uv'); parts.push(setColor(t, (c) => c.setRGB(0.5, 0.4, 0.3))); }
+  const tiers = [[0.62, 1.1, 0.95], [0.48, 0.95, 1.55], [0.34, 0.85, 2.1], [0.18, 0.6, 2.55]];
+  for (const [r, h, y] of tiers) {
+    const g = new THREE.ConeGeometry(r, h, 7, 1);
+    jitter(g, r * 0.12, rnd);
+    g.translate(0, y, 0);
+    parts.push(shadeByHeight(g, 0.5, 2.9));
+  }
+  return mergeGeometries(parts);
+}
+
+// ---------- Wald an den Hängen (Mischwald: Laubbäume + Fichten) ----------
 export function createForest(quality) {
   const rnd = seeded(99);
-  const geo = new THREE.IcosahedronGeometry(1, 1);
-  geo.scale(1, 1.15, 1);
-  geo.translate(0, 0.8, 0);
-  const mat = new THREE.MeshLambertMaterial();
+  const group = new THREE.Group();
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
   const N = quality.forest;
-  const im = new THREE.InstancedMesh(geo, mat, N);
+  const nC = Math.round(N * 0.38), nD = N - nC;
+  const dGeos = [decidGeo(rnd), decidGeo(rnd)];
+  const cGeo = coniferGeo(rnd);
+  const dMeshes = dGeos.map((g) => new THREE.InstancedMesh(g, mat, Math.ceil(nD / 2)));
+  const cMesh = new THREE.InstancedMesh(cGeo, mat, nC);
+  const counts = [0, 0, 0];
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
-  const cols = ['#24391b', '#2c4520', '#34502a', '#28401f', '#3f5d2a', '#4a6328', '#2f4a24'].map((c) => new THREE.Color(c));
-  let n = 0, tries = 0;
-  while (n < N && tries < N * 30) {
+  const dCols = ['#4a6e2c', '#557a32', '#5f8436', '#46682a', '#6a8a38', '#7a8c3a', '#52752e'].map((c) => new THREE.Color(c));
+  const cCols = ['#2a4a2c', '#2f5232', '#26442a', '#355a36'].map((c) => new THREE.Color(c));
+  let tries = 0;
+  while (counts[0] + counts[1] + counts[2] < N && tries < N * 30) {
     tries++;
     const x = (rnd() - 0.5) * 2400, z = (rnd() - 0.5) * 2400;
     if (Math.hypot(x, z) < 160) continue;
     const f = forestMask(x, z);
     if (rnd() > f) continue;
-    const k = 3.2 + rnd() * 3;
+    const y = heightAt(x, z);
+    // Fichten häufiger in höheren Lagen
+    const conifer = rnd() < 0.25 + Math.min(Math.max((y - 40) / 120, 0), 1) * 0.35;
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rnd() * 6.28);
-    s.set(k, k * (0.9 + rnd() * 0.6), k);
-    p.set(x, heightAt(x, z) - 0.8, z);
-    im.setMatrixAt(n, m4.compose(p, q, s));
-    const c = cols[Math.floor(rnd() * cols.length)].clone();
-    // Herbstliche Tupfer
-    if (rnd() < 0.03) c.set('#6f6a2c');
-    im.setColorAt(n, c);
-    n++;
+    if (conifer && counts[2] < nC) {
+      const k = 5.0 + rnd() * 3.0;
+      s.set(k, k * (1.1 + rnd() * 0.35), k);
+      p.set(x, y - 0.6, z);
+      cMesh.setMatrixAt(counts[2], m4.compose(p, q, s));
+      cMesh.setColorAt(counts[2]++, cCols[Math.floor(rnd() * cCols.length)]);
+    } else {
+      const i = rnd() < 0.5 ? 0 : 1;
+      if (counts[i] >= dMeshes[i].count) continue;
+      const k = 5.5 + rnd() * 3.5;
+      s.set(k * (0.9 + rnd() * 0.3), k * (0.85 + rnd() * 0.35), k * (0.9 + rnd() * 0.3));
+      p.set(x, y - 0.6, z);
+      dMeshes[i].setMatrixAt(counts[i], m4.compose(p, q, s));
+      const c = dCols[Math.floor(rnd() * dCols.length)].clone();
+      if (rnd() < 0.03) c.set('#8a7f38'); // vereinzelt herbstliche Tupfer
+      dMeshes[i].setColorAt(counts[i]++, c);
+    }
   }
-  im.count = n;
-  im.computeBoundingSphere();
-  return im;
+  dMeshes.forEach((m, i) => { m.count = counts[i]; });
+  cMesh.count = counts[2];
+  for (const m of [...dMeshes, cMesh]) { m.computeBoundingSphere(); group.add(m); }
+  return group;
 }
 
 // ---------- Dorf im Tal ----------

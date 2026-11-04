@@ -80,6 +80,16 @@ h2 { font-family: var(--display); font-weight: 900; font-size: clamp(2rem, 4vw, 
 .engine-btn.on .engine-led { background: #7bd35a; box-shadow: 0 0 10px #7bd35a; }
 .engine-btn.busy .engine-led { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
 
+/* Motor aus: Schalter pulsiert, damit man ihn sofort findet */
+.engine-btn.attention { background: rgba(242, 163, 58, 0.18); border-color: rgba(242, 163, 58, 0.85); color: #fff; animation: engine-pulse 1.8s var(--ease) infinite; }
+.engine-btn.attention .engine-led { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
+@keyframes engine-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(242, 163, 58, 0.65); }
+  70% { box-shadow: 0 0 0 14px rgba(242, 163, 58, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(242, 163, 58, 0); }
+}
+@media (prefers-reduced-motion: reduce) { .engine-btn.attention { animation: none; } }
+
 /* ---------- Hotspots ---------- */
 #hotspots { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
 .hotspot { position: absolute; left: 0; top: 0; pointer-events: auto; display: flex; align-items: center; gap: 0.5rem; transform: translate(-50%, -50%); transition: opacity 0.4s; will-change: transform; }

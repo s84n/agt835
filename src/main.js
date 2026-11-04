@@ -25,8 +25,8 @@ if (params.has('fast')) gsap.ticker.lagSmoothing(0); // nur für Tests bei sehr 
 // ---------- Qualitätsstufe ----------
 const isMobile = matchMedia('(pointer: coarse)').matches || Math.min(innerWidth, innerHeight) < 600;
 const Q = isMobile || params.get('q') === 'low'
-  ? { name: 'low', dpr: 1.5, shadowMap: 1024, terrainSeg: 220, grassRadius: 48, grassPerTile: 420, samples: 2, forest: 4000 }
-  : { name: 'high', dpr: 2, shadowMap: 2048, terrainSeg: 340, forest: 11000, grassRadius: 72, grassPerTile: 1250, samples: 4 };
+  ? { name: 'low', dpr: 1.5, shadowMap: 1024, terrainSeg: 220, grassRadius: 48, grassPerTile: 420, samples: 2, forest: 7000 }
+  : { name: 'high', dpr: 2, shadowMap: 2048, terrainSeg: 340, forest: 17000, grassRadius: 72, grassPerTile: 1250, samples: 4 };
 
 // ---------- Renderer / Szene ----------
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
@@ -146,7 +146,8 @@ function showShowroomUI(show) {
 async function startExperience() {
   $('#start-btn').disabled = true;
   await audio.init().catch(() => {});
-  startEngine();
+  // Motor bleibt beim Start aus – der Besucher lässt ihn selbst an
+  updateEngineButton();
 
   const loader = $('#loader');
   loader.classList.add('reveal');
@@ -169,6 +170,7 @@ async function startExperience() {
       controls.autoRotate = true;
       mode = 'showroom';
       showShowroomUI(true);
+      if (!ctrl.engineOn) setTimeout(() => !ctrl.engineOn && toast('Tipp: Lass den Motor an – unten rechts.'), 900);
     },
   });
   gsap.delayedCall(params.has('fast') ? 0.1 : 3.4, () => loader.classList.add('hidden'));
@@ -179,6 +181,7 @@ let engineBusy = false;
 function updateEngineButton() {
   const b = $('#engine-btn');
   b.classList.toggle('on', ctrl.engineOn);
+  b.classList.toggle('attention', !ctrl.engineOn && !engineBusy);
   b.classList.toggle('busy', engineBusy);
   b.setAttribute('aria-pressed', String(ctrl.engineOn));
   $('#engine-label').textContent = engineBusy ? 'Startet …' : ctrl.engineOn ? 'Motor aus' : 'Motor an';
@@ -562,7 +565,7 @@ function loop(ts) {
   mode = 'ready';
   camera.lookAt(0, 0, -200);
   $('#start-btn').disabled = false;
-  $('#start-label').textContent = 'Motor starten';
+  $('#start-label').textContent = 'Einsteigen';
   if (params.has('autostart')) startExperience();
 })();
 
