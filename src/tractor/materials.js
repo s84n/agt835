@@ -23,8 +23,8 @@ export function createMaterials() {
   paintMatte.userData.grime = { amount: 1.0, low: 0.3, high: 1.0, scale: 6, micro: 0.05, rust: 0.5, dust: 0.7 };
   plastic.userData.grime = { amount: 0.9, low: 0.35, high: 1.15, scale: 6, micro: 0.09, microScale: 90, dust: 0.9 };
   darkMetal.userData.grime = { amount: 1.0, low: 0.2, high: 1.0, scale: 7, micro: 0.12, microScale: 70, color: '#5e4a35', rust: 0.75, dust: 0.8 };
-  rim.userData.grime = { amount: 0.6, local: true, heightMix: 0, scale: 9, micro: 0.05, color: '#6a573f', rust: 0.6, dust: 0.3 };
-  rubber.userData.grime = { amount: 0.75, local: true, heightMix: 0, scale: 8, micro: 0.4, microScale: 55, color: '#4d3d2b', dust: 0 };
+  rim.userData.grime = { amount: 0.3, local: true, heightMix: 0, scale: 9, micro: 0.05, color: '#6a573f', rust: 0.6, dust: 0.3 };
+  rubber.userData.grime = { amount: 0.55, local: true, heightMix: 0, scale: 8, micro: 0.4, microScale: 55, color: '#4d3d2b', dust: 0 };
   seat.userData.grime = { amount: 0.15, micro: 0.18, microScale: 160, dust: 0.5 };
   steel.userData.grime = { amount: 0.55, low: 0.2, high: 0.9, scale: 8, micro: 0.05, rust: 0.7, dust: 0.4 };
 

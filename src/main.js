@@ -363,12 +363,24 @@ function updateRestCamera(dt, t) {
 // ---------- Fahrmodus ----------
 let camMode = 0; // 0 Verfolger, 1 Fahrersitz, 2 Action-Cam, 3 Kino
 const camModes = ['Verfolgerkamera', 'Fahrersitz', 'Action-Cam', 'Kinokamera'];
-const CAM_FOV = [42, 62, 104, 38];
+const CAM_FOV = [55, 62, 104, 38];
 const ACTION_POS = new THREE.Vector3(-0.92, 1.32, -1.42); // hinten links am Eck, fest verschraubt
 const ACTION_LOOK = new THREE.Vector3(0.18, 0.82, 0.95);
 const tmpUp = new THREE.Vector3();
 let cinePoint = null;
 const chase = { pos: new THREE.Vector3(), look: new THREE.Vector3() };
+let chaseDist = 3.4;
+addEventListener('wheel', (e) => { if (mode === 'drive' && camMode === 0) chaseDist = THREE.MathUtils.clamp(chaseDist * (1 + Math.sign(e.deltaY) * 0.1), 2.4, 8); }, { passive: true });
+{ // Pinch-Zoom auf dem Handy
+  let pd = 0;
+  addEventListener('touchmove', (e) => {
+    if (mode !== 'drive' || camMode !== 0 || e.touches.length !== 2 || e.target.closest('#touch')) return;
+    const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+    if (pd) chaseDist = THREE.MathUtils.clamp(chaseDist * pd / d, 2.4, 8);
+    pd = d;
+  }, { passive: true });
+  addEventListener('touchend', () => (pd = 0));
+}
 
 function enterDrive() {
   if (mode !== 'showroom') return;
@@ -390,6 +402,7 @@ function enterDrive() {
     onComplete: () => {
       chase.pos.copy(pos); chase.look.copy(look);
       mode = 'drive'; ctrl.driving = true;
+      camera.fov = CAM_FOV[camMode]; camera.updateProjectionMatrix();
       $('#drive-hud').classList.remove('hidden');
       $('#drive-help').classList.remove('fade');
       setTimeout(() => $('#drive-help').classList.add('fade'), 9000);
@@ -427,9 +440,11 @@ function chaseTarget() {
   const h = ctrl.heading + ctrl.phi * 0.5;
   const fwd = new THREE.Vector3(Math.sin(h), 0, Math.cos(h));
   const back = ctrl.v < -0.5 ? -1 : 1;
-  const pos = j.clone().addScaledVector(fwd, -6.2 * back).add(new THREE.Vector3(0, 2.7, 0));
-  pos.y = Math.max(pos.y, heightAt(pos.x, pos.z) + 1.3);
-  const look = j.clone().addScaledVector(fwd, 1.8 * back).add(new THREE.Vector3(0, 1.0, 0));
+  // nah dran (Standard 3,4 m), per Mausrad/Pinch zwischen 2,4 und 8 m
+  const d = chaseDist;
+  const pos = j.clone().addScaledVector(fwd, -d * back).add(new THREE.Vector3(0, 1.15 + d * 0.22, 0));
+  pos.y = Math.max(pos.y, heightAt(pos.x, pos.z) + 1.1);
+  const look = j.clone().addScaledVector(fwd, (0.9 + d * 0.15) * back).add(new THREE.Vector3(0, 1.05, 0));
   return { pos, look };
 }
 
@@ -450,7 +465,7 @@ function updateDriveCamera(dt) {
   if (camMode !== 2) camera.up.set(0, 1, 0);
   if (camMode === 0) {
     const { pos, look } = chaseTarget();
-    chase.pos.lerp(pos, 1 - Math.exp(-dt * 2.6));
+    chase.pos.lerp(pos, 1 - Math.exp(-dt * 3.4));
     chase.look.lerp(look, 1 - Math.exp(-dt * 6));
     camera.position.copy(chase.pos);
     camera.lookAt(chase.look);

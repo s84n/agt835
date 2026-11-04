@@ -49,28 +49,29 @@ export function applyGrime(material, o) {
       .replace('#include <color_fragment>', `#include <color_fragment>
         {
           vec3 P = uLocal > 0.5 ? vLPos : vTPos;
-          float n = gFbm(P * uScale);
+          // grobe Maske (wo überhaupt Dreck ist) × feines Korn (wie er aussieht)
+          float mask = gFbm(P * uScale * 0.9);
+          float n = gFbm(P * uScale * 4.0 + 5.0);
           float h = mix(1.0, 1.0 - smoothstep(uLow, uHigh, vTPos.y), uHeightMix);
-          float d = h * uAmount + (n - 0.55) * 1.1 * uAmount;
-          d *= smoothstep(0.25, 0.65, n + h * 0.35);
+          float d = smoothstep(0.62, 0.78, n * 0.55 + mask * 0.25 + h * 0.45 * uAmount) * uAmount;
           // feine Spritzer
-          float sp = smoothstep(0.78, 0.9, gNoise(P * uScale * 7.0)) * h * uAmount;
-          grimeD = clamp(max(d, sp * 0.8), 0.0, 0.92);
+          float sp = smoothstep(0.84, 0.92, gNoise(P * uScale * 16.0)) * h * uAmount;
+          grimeD = clamp(max(d, sp * 0.7), 0.0, 0.85);
           diffuseColor.rgb = mix(diffuseColor.rgb, uDirt * (0.8 + n * 0.4), grimeD);
 
           // Rost: einzelne Flecken mit ausgefranstem Rand + nach unten laufende Rostfahnen
           if (uRust > 0.0) {
-            float rn = gFbm(P * 9.0 + 3.1);
-            float spot = smoothstep(0.66 - uRust * 0.12, 0.74 - uRust * 0.12, rn);
-            float streak = smoothstep(0.62, 0.8, gNoise(vec3(P.x * 30.0, P.y * 2.5, P.z * 30.0))) * smoothstep(0.55, 0.7, gFbm(P * 4.0 + 7.0));
-            float rust = clamp(max(spot, streak * 0.6) * uRust * 1.4, 0.0, 0.9);
+            float rn = gFbm(P * 26.0 + 3.1);
+            float spot = smoothstep(0.7 - uRust * 0.08, 0.75 - uRust * 0.08, rn) * smoothstep(0.45, 0.6, gFbm(P * 5.0 + 1.7));
+            float streak = smoothstep(0.7, 0.85, gNoise(vec3(P.x * 70.0, P.y * 5.0, P.z * 70.0))) * smoothstep(0.6, 0.72, gFbm(P * 6.0 + 7.0));
+            float rust = clamp(max(spot, streak * 0.5) * uRust * 1.3, 0.0, 0.85);
             vec3 rustCol = mix(vec3(0.24, 0.1, 0.04), vec3(0.5, 0.22, 0.08), gNoise(P * 60.0));
             diffuseColor.rgb = mix(diffuseColor.rgb, rustCol, rust);
             grimeD = max(grimeD, rust);
           }
           // Staub sammelt sich auf waagerechten Flächen (Haube, Kotflügel, Trittflächen)
-          float dust = smoothstep(0.55, 0.92, vUp) * uDust * (0.45 + 0.55 * gFbm(P * 3.0 + 11.0));
-          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.62, 0.55, 0.43), dust * 0.55);
+          float dust = smoothstep(0.6, 0.95, vUp) * uDust * smoothstep(0.4, 0.75, gFbm(P * 14.0 + 11.0));
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.62, 0.55, 0.43), dust * 0.4);
           grimeD = max(grimeD, dust * 0.6);
         }`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>

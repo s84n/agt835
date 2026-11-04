@@ -390,24 +390,71 @@ export class EngineAudio {
     this.tickTimer = setTimeout(tick, 1500);
   }
 
-  // Kirchenglocke im Dorf: unharmonische Teiltöne, weit weg (Tiefpass + Hall)
-  bell(strikes = 3, gap = 2.6) {
+  // Kirchenglocke im Dorf – nach dem Teiltonaufbau echter Glocken:
+  // Unterton (Hum), Grundton (Prime), kleine Terz, Quinte, Nominal und obere Mixtur.
+  // Jeder Teilton als leicht verstimmtes Paar (Schwebung = typisches „Wummern“),
+  // dazu ein metallischer Anschlag aus Klöppel-Geräusch und eigener großer Hall.
+  bell(strikes = 3, gap = 2.8) {
     if (!this.ready) return;
     const ctx = this.ctx;
-    const out = ctx.createGain(); out.gain.value = 0.06;
-    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2200;
-    out.connect(lp).connect(this.ambient);
-    if (this.verb) lp.connect(this.verb);
-    const partials = [[0.5, 0.5, 6], [1, 1, 4.5], [1.19, 0.6, 3.5], [1.56, 0.45, 2.8], [2.0, 0.35, 2.2], [2.51, 0.22, 1.6], [3.01, 0.15, 1.2]];
-    const base = 262;
+    if (!this.bellVerb) {
+      // lange Hallfahne (~6 s), dunkel ausklingend – Kirchturm über dem Tal
+      const len = ctx.sampleRate * 6;
+      const ir = ctx.createBuffer(2, len, ctx.sampleRate);
+      for (let c = 0; c < 2; c++) {
+        const d = ir.getChannelData(c);
+        let lp = 0;
+        for (let i = 0; i < len; i++) {
+          const t = i / len;
+          lp += ((Math.random() * 2 - 1) - lp) * (0.5 - t * 0.42); // wird zum Ende dumpfer
+          d[i] = lp * Math.pow(1 - t, 2.2) * (i < 1200 ? i / 1200 : 1);
+        }
+      }
+      this.bellVerb = ctx.createConvolver(); this.bellVerb.buffer = ir;
+      const vg = ctx.createGain(); vg.gain.value = 0.9;
+      this.bellVerb.connect(vg).connect(this.ambient);
+    }
+    const out = ctx.createGain(); out.gain.value = 0.05;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 5200; // Entfernung
+    const dry = ctx.createGain(); dry.gain.value = 0.35;
+    const wet = ctx.createGain(); wet.gain.value = 1.0;
+    out.connect(lp);
+    lp.connect(dry).connect(this.ambient);
+    lp.connect(wet).connect(this.bellVerb);
+
+    const base = 196; // g – mittelgroße Dorfglocke
+    // [Verhältnis, Lautstärke, Abklingzeit s]
+    const partials = [
+      [0.5, 0.55, 9], [1.0, 0.7, 6.5], [1.183, 0.6, 5], [1.506, 0.32, 3.6], [2.0, 0.6, 3.2],
+      [2.514, 0.3, 2.4], [2.662, 0.28, 2.2], [3.011, 0.22, 1.8], [4.166, 0.16, 1.2], [5.433, 0.12, 0.9], [6.796, 0.08, 0.6],
+    ];
     for (let k = 0; k < strikes; k++) {
       const t = ctx.currentTime + 0.1 + k * gap;
+      const vel = 0.85 + Math.random() * 0.15;
       for (const [ratio, amp, dec] of partials) {
-        const o = ctx.createOscillator(); o.frequency.value = base * ratio * (1 + (Math.random() - 0.5) * 0.002);
+        for (const det of [-1, 1]) {
+          const o = ctx.createOscillator();
+          o.frequency.value = base * ratio * (1 + det * (0.0006 + ratio * 0.0004));
+          const g = ctx.createGain();
+          g.gain.setValueAtTime(0, t);
+          g.gain.linearRampToValueAtTime(amp * vel * 0.5, t + 0.004);
+          g.gain.exponentialRampToValueAtTime(amp * vel * 0.18, t + Math.min(0.3, dec * 0.1)); // schneller erster Abfall
+          g.gain.exponentialRampToValueAtTime(0.0004, t + dec);
+          o.connect(g).connect(out); o.start(t); o.stop(t + dec + 0.1);
+        }
+      }
+      // Klöppelanschlag: kurzes, hell klingendes Metallgeräusch
+      const n = ctx.createBufferSource(); n.buffer = this.whiteBuf;
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 2600; bp.Q.value = 2.5;
+      const ng = ctx.createGain();
+      ng.gain.setValueAtTime(0.5 * vel, t); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
+      n.connect(bp).connect(ng).connect(out); n.start(t, Math.random()); n.stop(t + 0.1);
+      // hoher, metallischer „Ping“ einiger Inharmonischer
+      for (const f of [3870, 5210, 7140]) {
+        const o = ctx.createOscillator(); o.frequency.value = f * (0.98 + Math.random() * 0.04);
         const g = ctx.createGain();
-        g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(amp, t + 0.008);
-        g.gain.exponentialRampToValueAtTime(0.0008, t + dec);
-        o.connect(g).connect(out); o.start(t); o.stop(t + dec + 0.1);
+        g.gain.setValueAtTime(0.06 * vel, t); g.gain.exponentialRampToValueAtTime(0.0005, t + 0.35);
+        o.connect(g).connect(out); o.start(t); o.stop(t + 0.4);
       }
     }
   }
