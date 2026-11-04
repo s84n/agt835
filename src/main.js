@@ -20,6 +20,8 @@ import { HotspotLayer } from './ui/hotspots.js';
 const $ = (s) => document.querySelector(s);
 const params = new URLSearchParams(location.search);
 const BASE = import.meta.env.BASE_URL;
+// 0.9.0 → „v0.9“, 0.9.1 → „v0.9.1“
+$('#version').textContent = 'v' + __APP_VERSION__.replace(/\.0$/, '');
 if (params.has('fast')) gsap.ticker.lagSmoothing(0); // nur für Tests bei sehr niedriger Framerate
 
 // ---------- Qualitätsstufe ----------
