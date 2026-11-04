@@ -72,10 +72,29 @@ export function villageMask(x, z) {
 }
 
 function gridMap(u, R, a = 0.22) { return R * (a * u + (1 - a) * u * u * u); }
+function gridInv(x, R, a = 0.22) { // Newton-Verfahren, gridMap ist streng monoton
+  let u = Math.max(-1, Math.min(1, x / R));
+  for (let i = 0; i < 8; i++) u -= (gridMap(u, R, a) - x) / (R * (a + 3 * (1 - a) * u * u));
+  return u;
+}
+const MESH = { R: 1300, seg: 0 };
+
+// Höhe exakt so, wie das Geländenetz trianguliert ist (für Decals wie Reifenspuren)
+export function meshHeightAt(x, z) {
+  const { R, seg } = MESH;
+  if (!seg) return heightAt(x, z);
+  const fx = (gridInv(x, R) + 1) / 2 * seg, fz = (gridInv(z, R) + 1) / 2 * seg;
+  const ix = Math.floor(fx), iz = Math.floor(fz), tx = fx - ix, tz = fz - iz;
+  const H = (i, j) => heightAt(gridMap(-1 + 2 * i / seg, R), gridMap(-1 + 2 * j / seg, R));
+  const ha = H(ix, iz), hb = H(ix, iz + 1), hc = H(ix + 1, iz + 1), hd = H(ix + 1, iz);
+  // PlaneGeometry teilt jede Zelle entlang der Diagonale b–d
+  return tx + tz < 1 ? ha + (hd - ha) * tx + (hb - ha) * tz : hc + (hb - hc) * (1 - tx) + (hd - hc) * (1 - tz);
+}
 
 export function createTerrain(quality) {
-  const R = 1300;
+  const R = MESH.R;
   const seg = quality.terrainSeg;
+  MESH.seg = seg;
   const geo = new THREE.PlaneGeometry(2, 2, seg, seg);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position;

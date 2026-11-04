@@ -19,14 +19,14 @@ export function createMaterials() {
   const checker = new THREE.MeshStandardMaterial({ color: '#3a3c3e', roughness: 0.6, metalness: 0.6, map: checkerTex() });
 
   // Gebrauchsspuren (werden in grime.js als Shader angewendet)
-  paint.userData.grime = { amount: 0.75, low: 0.3, high: 0.95, scale: 5, micro: 0.022, microScale: 140 };
-  paintMatte.userData.grime = { amount: 0.85, low: 0.3, high: 0.9, scale: 6, micro: 0.04 };
-  plastic.userData.grime = { amount: 0.7, low: 0.35, high: 1.0, scale: 6, micro: 0.09, microScale: 90 };
-  darkMetal.userData.grime = { amount: 0.85, low: 0.2, high: 0.85, scale: 7, micro: 0.12, microScale: 70, color: '#5e4a35' };
-  rim.userData.grime = { amount: 0.4, local: true, heightMix: 0, scale: 9, micro: 0.05, color: '#6a573f' };
-  rubber.userData.grime = { amount: 0.5, local: true, heightMix: 0, scale: 8, micro: 0.4, microScale: 55, color: '#4d3d2b' };
-  seat.userData.grime = { amount: 0.0, micro: 0.18, microScale: 160 };
-  steel.userData.grime = { amount: 0.4, low: 0.2, high: 0.8, scale: 8, micro: 0.05 };
+  paint.userData.grime = { amount: 0.95, low: 0.3, high: 1.15, scale: 5, micro: 0.03, microScale: 140, rust: 0.25, dust: 0.75 };
+  paintMatte.userData.grime = { amount: 1.0, low: 0.3, high: 1.0, scale: 6, micro: 0.05, rust: 0.5, dust: 0.7 };
+  plastic.userData.grime = { amount: 0.9, low: 0.35, high: 1.15, scale: 6, micro: 0.09, microScale: 90, dust: 0.9 };
+  darkMetal.userData.grime = { amount: 1.0, low: 0.2, high: 1.0, scale: 7, micro: 0.12, microScale: 70, color: '#5e4a35', rust: 0.75, dust: 0.8 };
+  rim.userData.grime = { amount: 0.6, local: true, heightMix: 0, scale: 9, micro: 0.05, color: '#6a573f', rust: 0.6, dust: 0.3 };
+  rubber.userData.grime = { amount: 0.75, local: true, heightMix: 0, scale: 8, micro: 0.4, microScale: 55, color: '#4d3d2b', dust: 0 };
+  seat.userData.grime = { amount: 0.15, micro: 0.18, microScale: 160, dust: 0.5 };
+  steel.userData.grime = { amount: 0.55, low: 0.2, high: 0.9, scale: 8, micro: 0.05, rust: 0.7, dust: 0.4 };
 
   return { paint, paintMatte, plastic, darkMetal, steel, rubber, rim, chrome, seat, headGlass, amber, tail, checker,
     grille: new THREE.MeshStandardMaterial({ map: grilleTex(), roughness: 0.7, metalness: 0.3 }),

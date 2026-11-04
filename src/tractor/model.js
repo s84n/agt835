@@ -196,7 +196,7 @@ export function createTractor() {
   const plateMat = M.checker.clone();
   plateMat.color.set('#26282a');
   plateMat.map = M.checker.map.clone(); plateMat.map.repeat.set(5, 5); plateMat.map.needsUpdate = true;
-  plateMat.userData.grime = { amount: 0.6, low: 0.3, high: 0.8, scale: 7, micro: 0.06, color: '#5e4a35' };
+  plateMat.userData.grime = { amount: 0.8, low: 0.3, high: 0.9, scale: 7, micro: 0.06, color: '#5e4a35', rust: 0.55, dust: 0.9 };
   mesh(bGeo, plateMat, BW / 2 - 0.01, 0, 0, front);
   // Warnstreifen oben auf der Vorderkante (liegend)
   const topStripe = mesh(new THREE.PlaneGeometry(BW - 0.06, 0.15), M.stripes, 0, B.y1 + 0.013, B.zt - 0.09, front);

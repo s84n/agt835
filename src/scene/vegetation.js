@@ -9,6 +9,7 @@ export const shared = {
   uTime: { value: 0 },
   uPush: { value: new THREE.Vector4(0, 0, 0, 0) },   // xyz = Traktormitte, w = Stärke
   uPush2: { value: new THREE.Vector4(0, 0, 0, 0) },  // zweiter Achspunkt
+  uTrail: { value: null },                            // Spurkarte (gefahrene Bahnen)
 };
 
 function colorize(geo, color) {
@@ -535,9 +536,10 @@ function grassMaterial(fadeStart, fadeEnd, swayAmt) {
     sh.uniforms.uTime = shared.uTime;
     sh.uniforms.uPush = shared.uPush;
     sh.uniforms.uPush2 = shared.uPush2;
+    sh.uniforms.uTrail = shared.uTrail;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>
-        uniform float uTime; uniform vec4 uPush; uniform vec4 uPush2;
+        uniform float uTime; uniform vec4 uPush; uniform vec4 uPush2; uniform sampler2D uTrail;
         attribute vec4 aOffset; attribute vec3 aTint;`)
       .replace('#include <color_vertex>', `#include <color_vertex>
         vColor.rgb *= aTint;`)
@@ -565,6 +567,9 @@ function grassMaterial(fadeStart, fadeEnd, swayAmt) {
           transformed.y *= 1.0 - f * 0.85;
           transformed.xz += normalize(d + 0.0001) * f * 0.35 * hgt;
         }
+        // gefahrene Bahnen bleiben niedergedrückt
+        float trail = texture2D(uTrail, aOffset.xz / 240.0 + 0.5).r;
+        transformed.y *= 1.0 - trail * 0.78;
         transformed += aOffset.xyz;
       `)
       .replace('#include <project_vertex>', `

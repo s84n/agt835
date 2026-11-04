@@ -16,6 +16,7 @@ import { TractorController } from './tractor/controller.js';
 import { grimeShared } from './tractor/grime.js';
 import { EngineAudio } from './audio/engine.js';
 import { HotspotLayer } from './ui/hotspots.js';
+import { TireTracks } from './scene/tracks.js';
 
 const $ = (s) => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -84,7 +85,8 @@ const audio = new EngineAudio();
 const tick = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 const progress = (p) => ($('#progress-bar').style.width = `${Math.round(p * 100)}%`);
 
-let atm, grass, parts, ctrl, hotspots, orchardLod, obstacles = [];
+let atm, grass, parts, ctrl, hotspots, orchardLod, tracks, obstacles = [];
+const wheelPts = [0, 1, 2, 3].map(() => new THREE.Vector3());
 const STAGE_HEADING = 1.2;
 const G0 = heightAt(0, 0); // Bodenhöhe der Bühne
 const DEFAULT_TARGET = new THREE.Vector3(0, G0 + 0.95, 0);
@@ -111,6 +113,9 @@ async function build() {
   scene.add(createForest(Q));
   scene.add(createVillage());
   progress(0.65); await tick();
+  tracks = new TireTracks();
+  shared.uTrail.value = tracks.map;
+  scene.add(tracks.mesh);
   grass = new Grass(Q);
   scene.add(grass.group);
   progress(0.8); await tick();
@@ -541,6 +546,12 @@ function loop(ts) {
     shared.uPush.value.set(fa.x, fa.y, fa.z, 1);
     const ra = parts.rear.localToWorld(tmpV.set(0, 0, -0.66));
     shared.uPush2.value.set(ra.x, ra.y, ra.z, 1);
+    // Reifenspuren: Aufstandspunkte der vier Räder
+    parts.front.localToWorld(wheelPts[0].set(0.56, 0, 0.66));
+    parts.front.localToWorld(wheelPts[1].set(-0.56, 0, 0.66));
+    parts.rear.localToWorld(wheelPts[2].set(0.56, 0, -0.66));
+    parts.rear.localToWorld(wheelPts[3].set(-0.56, 0, -0.66));
+    tracks.update(dt, t, wheelPts, Math.abs(ctrl.v) > 0.15);
   }
 
   if (window.__freeze) { /* Debug: Kamera frei */ } else if (mode === 'showroom') {
@@ -597,4 +608,4 @@ function loop(ts) {
 })();
 
 // Für Debugging in der Konsole
-window.__agt = { scene, camera, audio, renderer, composer, get ctrl() { return ctrl; }, get atm() { return atm; }, controls, enterDrive, exitDrive, focusHotspot };
+window.__agt = { scene, camera, audio, renderer, composer, get ctrl() { return ctrl; }, get tracks() { return tracks; }, get parts() { return parts; }, wheelPts, get atm() { return atm; }, controls, enterDrive, exitDrive, focusHotspot };
