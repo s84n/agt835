@@ -10,6 +10,7 @@ export const shared = {
   uPush: { value: new THREE.Vector4(0, 0, 0, 0) },   // xyz = Traktormitte, w = Stärke
   uPush2: { value: new THREE.Vector4(0, 0, 0, 0) },  // zweiter Achspunkt
   uTrail: { value: null },                            // Spurkarte (gefahrene Bahnen)
+  uNight: { value: 0 },                               // 0 = Tag, 1 = Abend (Dorflichter, Glühwürmchen)
 };
 
 function colorize(geo, color) {
@@ -445,7 +446,31 @@ export function createVillage() {
   im.setMatrixAt(list.length, m4.compose(p, q, s));
   im.setColorAt(list.length, new THREE.Color('#ffffff'));
   im.computeBoundingSphere();
-  return im;
+
+  // Fenster: gehen abends Haus für Haus an (Schwelle je Haus, gesteuert über uNight)
+  const wins = [];
+  for (const [x, z] of [[-0.25, 0.506], [0.05, 0.506], [0.28, 0.506], [-0.2, -0.506], [0.22, -0.506]]) {
+    wins.push(new THREE.PlaneGeometry(0.1, 0.12).translate(x, 0.3, z));
+  }
+  for (const z of [-0.22, 0.2]) wins.push(new THREE.PlaneGeometry(0.1, 0.12).rotateY(Math.PI / 2).translate(0.506, 0.3, z));
+  for (const z of [0.0]) wins.push(new THREE.PlaneGeometry(0.1, 0.12).rotateY(Math.PI / 2).translate(-0.506, 0.3, z));
+  const winGeo = mergeGeometries(wins);
+  const thr = new Float32Array(list.length);
+  for (let i = 0; i < list.length; i++) thr[i] = 0.2 + rnd() * 0.75;
+  winGeo.setAttribute('aThresh', new THREE.InstancedBufferAttribute(thr, 1));
+  const winMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffc477').multiplyScalar(2.6), side: THREE.DoubleSide });
+  winMat.onBeforeCompile = (sh) => {
+    sh.uniforms.uNight = shared.uNight;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uNight; attribute float aThresh;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed *= step(aThresh, uNight);');
+  };
+  const windows = new THREE.InstancedMesh(winGeo, winMat, list.length);
+  for (let i = 0; i < list.length; i++) { im.getMatrixAt(i, m4); windows.setMatrixAt(i, m4); }
+  windows.computeBoundingSphere();
+  const group = new THREE.Group();
+  group.add(im, windows);
+  return group;
 }
 
 // ---------- Holzstapel (Foto 5) ----------

@@ -70,6 +70,9 @@ export class EngineAudio {
     this.osc.start(); this.osc2.start();
 
     this.noiseBuf = this.makeNoise(2);
+    this.whiteBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+    { const d = this.whiteBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
+    this.initDriveSounds();
     this.startAmbient();
     this.ready = true;
   }
@@ -147,6 +150,7 @@ export class EngineAudio {
       for (let i = 0; i < len; i++) { const t = i / len; d[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 3.2) * (i < 600 ? i / 600 : 1); }
     }
     const verb = ctx.createConvolver(); verb.buffer = ir;
+    this.verb = verb;
     const verbGain = ctx.createGain(); verbGain.gain.value = 0.3;
     verb.connect(verbGain).connect(this.ambient);
 
@@ -305,6 +309,109 @@ export class EngineAudio {
     this.setMood(this.mood || 'golden');
   }
 
+  // ---------- Fahrgeräusche ----------
+  initDriveSounds() {
+    const ctx = this.ctx;
+    this.driveBus = ctx.createGain(); this.driveBus.gain.value = 1;
+    this.driveBus.connect(this.master);
+    // Getriebe: Zahnradheulen, Tonhöhe folgt Raddrehzahl × Übersetzung
+    this.whine = ctx.createOscillator(); this.whine.type = 'triangle';
+    const wbp = ctx.createBiquadFilter(); wbp.type = 'bandpass'; wbp.Q.value = 6; this.whineBP = wbp;
+    this.whineG = ctx.createGain(); this.whineG.gain.value = 0;
+    this.whine.connect(wbp).connect(this.whineG).connect(this.driveBus);
+    this.whine.start();
+    const loopNoise = (buf) => { const n = ctx.createBufferSource(); n.buffer = buf; n.loop = true; n.start(0, Math.random()); return n; };
+    // Kies/Schotter: körniges Knirschen
+    const cbp = ctx.createBiquadFilter(); cbp.type = 'bandpass'; cbp.frequency.value = 2400; cbp.Q.value = 0.9;
+    this.crunchG = ctx.createGain(); this.crunchG.gain.value = 0;
+    loopNoise(this.whiteBuf).connect(cbp).connect(this.crunchG).connect(this.driveBus);
+    const clp = ctx.createBiquadFilter(); clp.type = 'lowpass'; clp.frequency.value = 500;
+    this.rumbleG = ctx.createGain(); this.rumbleG.gain.value = 0;
+    loopNoise(this.noiseBuf).connect(clp).connect(this.rumbleG).connect(this.driveBus);
+    // Gras: weiches Rascheln unter den Reifen
+    const glp = ctx.createBiquadFilter(); glp.type = 'lowpass'; glp.frequency.value = 1400;
+    const ghp = ctx.createBiquadFilter(); ghp.type = 'highpass'; ghp.frequency.value = 250;
+    this.swishG = ctx.createGain(); this.swishG.gain.value = 0;
+    loopNoise(this.whiteBuf).connect(glp).connect(ghp).connect(this.swishG).connect(this.driveBus);
+  }
+
+  updateDrive({ speed = 0, gear = 1, reverse = false, onPath = false, listen = 1 }) {
+    if (!this.ready || !this.whine) return;
+    const t = this.ctx.currentTime, v = Math.min(speed / 8, 1);
+    const ratios = [7.5, 5.2, 3.8, 2.8, 2.1, 1.6, 1.25, 1.0];
+    const f = Math.max(30, speed * 38 * (reverse ? 6 : ratios[gear - 1]));
+    this.whine.frequency.setTargetAtTime(f, t, 0.08);
+    this.whineBP.frequency.setTargetAtTime(f, t, 0.08);
+    this.whineG.gain.setTargetAtTime(speed > 0.3 ? (0.012 + v * 0.02) * listen : 0, t, 0.15);
+    // Kies knistert unregelmäßig – Zufall pro Frame ergibt die Körnung
+    const crunch = onPath ? Math.min(speed / 4, 1) : 0;
+    this.crunchG.gain.setTargetAtTime(crunch * (0.03 + Math.random() * 0.07) * listen, t, 0.015);
+    this.rumbleG.gain.setTargetAtTime((onPath ? 0.14 : 0.07) * v * listen, t, 0.1);
+    this.swishG.gain.setTargetAtTime(!onPath ? Math.min(speed / 5, 1) * (0.012 + Math.random() * 0.012) * listen : 0, t, 0.05);
+  }
+
+  // Hydraulik beim Heben/Senken: Zischen + Pumpenton
+  hydraulic(dur = 1.6) {
+    if (!this.ready) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const n = ctx.createBufferSource(); n.buffer = this.whiteBuf; n.loop = true;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 3200; bp.Q.value = 1.4;
+    const g = ctx.createGain(); g.gain.value = 0;
+    n.connect(bp).connect(g).connect(this.master);
+    const o = ctx.createOscillator(); o.type = 'sawtooth';
+    o.frequency.setValueAtTime(380, t); o.frequency.linearRampToValueAtTime(520, t + dur);
+    const olp = ctx.createBiquadFilter(); olp.type = 'lowpass'; olp.frequency.value = 900;
+    const og = ctx.createGain(); og.gain.value = 0;
+    o.connect(olp).connect(og).connect(this.master);
+    for (const [gg, peak] of [[g, 0.05], [og, 0.035]]) {
+      gg.gain.setValueAtTime(0, t); gg.gain.linearRampToValueAtTime(peak, t + 0.12);
+      gg.gain.setValueAtTime(peak, t + dur - 0.2); gg.gain.linearRampToValueAtTime(0, t + dur);
+    }
+    n.start(t); o.start(t); n.stop(t + dur + 0.05); o.stop(t + dur + 0.05);
+  }
+
+  // Abkühlender Motor: metallisches Knacken, wird seltener
+  coolingTicks() {
+    if (!this.ready) return;
+    clearTimeout(this.tickTimer);
+    const start = this.ctx.currentTime;
+    const tick = () => {
+      const ctx = this.ctx, t = ctx.currentTime, el = t - start;
+      if (el > 35 || this.engineRunning) return;
+      const o = ctx.createOscillator(); o.type = 'square';
+      o.frequency.value = 2200 + Math.random() * 2500;
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = o.frequency.value; bp.Q.value = 12;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.05 + Math.random() * 0.04, t); g.gain.exponentialRampToValueAtTime(0.0005, t + 0.05);
+      o.connect(bp).connect(g).connect(this.master);
+      o.start(t); o.stop(t + 0.06);
+      this.tickTimer = setTimeout(tick, (400 + Math.random() * 1600) * (1 + el / 10));
+    };
+    this.tickTimer = setTimeout(tick, 1500);
+  }
+
+  // Kirchenglocke im Dorf: unharmonische Teiltöne, weit weg (Tiefpass + Hall)
+  bell(strikes = 3, gap = 2.6) {
+    if (!this.ready) return;
+    const ctx = this.ctx;
+    const out = ctx.createGain(); out.gain.value = 0.06;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2200;
+    out.connect(lp).connect(this.ambient);
+    if (this.verb) lp.connect(this.verb);
+    const partials = [[0.5, 0.5, 6], [1, 1, 4.5], [1.19, 0.6, 3.5], [1.56, 0.45, 2.8], [2.0, 0.35, 2.2], [2.51, 0.22, 1.6], [3.01, 0.15, 1.2]];
+    const base = 262;
+    for (let k = 0; k < strikes; k++) {
+      const t = ctx.currentTime + 0.1 + k * gap;
+      for (const [ratio, amp, dec] of partials) {
+        const o = ctx.createOscillator(); o.frequency.value = base * ratio * (1 + (Math.random() - 0.5) * 0.002);
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(amp, t + 0.008);
+        g.gain.exponentialRampToValueAtTime(0.0008, t + dec);
+        o.connect(g).connect(out); o.start(t); o.stop(t + dec + 0.1);
+      }
+    }
+  }
+
   setMood(name) {
     this.mood = name;
     if (!this.ctx || !this.birdBus) return;
@@ -312,6 +419,11 @@ export class EngineAudio {
     const birds = { day: 1.0, golden: 0.85, dusk: 0.3 }[name] ?? 0.85;
     this.birdBus.gain.setTargetAtTime(birds, t, 1.5);
     this.cricketBus.gain.setTargetAtTime(name === 'dusk' ? 1 : 0, t, 2);
+    clearTimeout(this.bellTimer);
+    // ab und zu schlägt die Kirchturmuhr; beim Wechsel auf Abend: Abendläuten
+    const chime = () => { this.bell(this.mood === 'dusk' ? 5 : 3); this.bellTimer = setTimeout(chime, 180000 + Math.random() * 120000); };
+    if (name === 'dusk') this.bellTimer = setTimeout(() => { this.bell(7, 2.4); this.bellTimer = setTimeout(chime, 180000); }, 3500);
+    else this.bellTimer = setTimeout(chime, 60000 + Math.random() * 60000);
   }
 
   // pro Frame

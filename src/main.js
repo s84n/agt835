@@ -17,6 +17,10 @@ import { grimeShared } from './tractor/grime.js';
 import { EngineAudio } from './audio/engine.js';
 import { HotspotLayer } from './ui/hotspots.js';
 import { TireTracks } from './scene/tracks.js';
+import { createRestArea } from './scene/feierabend.js';
+import { createFireflies, createButterflies } from './scene/critters.js';
+import { GodRaysPass } from './scene/godrays.js';
+import { pathDist } from './scene/terrain.js';
 
 const $ = (s) => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -49,6 +53,8 @@ const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.Ha
 const composer = new EffectComposer(renderer, rt);
 composer.setPixelRatio(Math.min(devicePixelRatio, Q.dpr));
 composer.addPass(new RenderPass(scene, camera));
+const godrays = new GodRaysPass();
+composer.addPass(godrays);
 const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.3, 0.55, 0.88);
 composer.addPass(bloom);
 const finish = new ShaderPass({
@@ -85,7 +91,7 @@ const audio = new EngineAudio();
 const tick = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 const progress = (p) => ($('#progress-bar').style.width = `${Math.round(p * 100)}%`);
 
-let atm, grass, parts, ctrl, hotspots, orchardLod, tracks, obstacles = [];
+let atm, grass, parts, ctrl, hotspots, orchardLod, tracks, rest, obstacles = [];
 const wheelPts = [0, 1, 2, 3].map(() => new THREE.Vector3());
 const STAGE_HEADING = 1.2;
 const G0 = heightAt(0, 0); // Bodenhöhe der Bühne
@@ -106,6 +112,11 @@ async function build() {
   scene.add(orchard.group);
   orchardLod = orchard.lod;
   obstacles.push(...orchard.obstacles);
+  // Feierabend-Bank unter dem Obstbaum bei (12, 14), Blick Richtung Traktor und Tal
+  rest = createRestArea(11.0, 12.1, Math.atan2(-11.0, -12.1));
+  scene.add(rest.group);
+  obstacles.push(...rest.obstacles);
+  scene.add(createButterflies(Q.name === 'low' ? 14 : 26), createFireflies(Q.name === 'low' ? 80 : 140));
   const wood = createWoodpile(-11, -9, 0.9);
   scene.add(wood.group);
   obstacles.push(wood.obstacle);
@@ -201,6 +212,7 @@ function startEngine() {
   const t = audio.crank();
   return new Promise((res) => setTimeout(() => {
     ctrl.engineOn = true; ctrl.rpm = 1500; engineBusy = false;
+    audio.engineRunning = true;
     updateEngineButton(); res();
   }, t * 1000));
 }
@@ -209,6 +221,8 @@ function stopEngine() {
   ctrl.engineOn = false;
   ctrl.revBoost = 0; ctrl.ptoSpin = 0;
   setTimeout(() => audio.clunk(0.35), 900); // Motor läuft aus und schüttelt sich ab
+  audio.engineRunning = false;
+  audio.coolingTicks();
   updateEngineButton();
 }
 
@@ -283,12 +297,67 @@ function runAction(a) {
     }
     case 'lift': {
       ctrl.liftTarget = 1;
+      audio.hydraulic(1.4);
+      gsap.delayedCall(3.2, () => audio.hydraulic(1.2));
       gsap.to(ctrl, { revBoost: 450, duration: 0.4, yoyo: true, repeat: 1, repeatDelay: 1.4 });
       gsap.delayedCall(3.2, () => (ctrl.liftTarget = 0));
       break;
     }
     case 'lights': ctrl.setLamps(!ctrl.lampsOn); break;
   }
+}
+
+// ---------- Feierabend: auf der Bank sitzen ----------
+const restLook = { tx: 0, ty: 0, x: 0, y: 0 };
+function enterRest() {
+  if (mode !== 'showroom') return;
+  mode = 'transition';
+  closeCard();
+  $('#datasheet').classList.add('hidden');
+  showShowroomUI(false);
+  controls.enabled = false; controls.autoRotate = false;
+  const from = camera.position.clone(), lookFrom = controls.target.clone();
+  const p = { t: 0 };
+  gsap.to(p, {
+    t: 1, duration: 3.2, ease: 'power2.inOut',
+    onUpdate: () => {
+      // leichter Bogen nach oben, damit die Kamera nicht durch Äste fährt
+      camera.position.lerpVectors(from, rest.seatWorld, p.t);
+      camera.position.y += Math.sin(p.t * Math.PI) * 2.2;
+      camera.lookAt(lookFrom.clone().lerp(rest.lookWorld, p.t));
+    },
+    onComplete: () => { mode = 'rest'; $('#rest-hud').classList.remove('hidden'); },
+  });
+}
+function exitRest() {
+  if (mode !== 'rest') return;
+  mode = 'transition';
+  $('#rest-hud').classList.add('hidden');
+  const from = camera.position.clone(), lookFrom = rest.lookWorld.clone();
+  const p = { t: 0 };
+  gsap.to(p, {
+    t: 1, duration: 2.6, ease: 'power2.inOut',
+    onUpdate: () => {
+      camera.position.lerpVectors(from, DEFAULT_CAM, p.t);
+      camera.position.y += Math.sin(p.t * Math.PI) * 2.2;
+      camera.lookAt(lookFrom.clone().lerp(DEFAULT_TARGET, p.t));
+    },
+    onComplete: () => {
+      controls.target.copy(DEFAULT_TARGET); controls.enabled = true; controls.update();
+      mode = 'showroom'; showShowroomUI(true);
+    },
+  });
+}
+function updateRestCamera(dt, t) {
+  // sanft umschauen mit der Maus/dem Finger, dazu ruhiges Atmen
+  restLook.x += (restLook.tx - restLook.x) * (1 - Math.exp(-dt * 2));
+  restLook.y += (restLook.ty - restLook.y) * (1 - Math.exp(-dt * 2));
+  camera.position.copy(rest.seatWorld);
+  camera.position.y += Math.sin(t * 0.9) * 0.012;
+  const dir = rest.lookWorld.clone().sub(rest.seatWorld);
+  dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), -restLook.x * 0.6);
+  dir.y -= restLook.y * 2.2;
+  camera.lookAt(rest.seatWorld.clone().add(dir));
 }
 
 // ---------- Fahrmodus ----------
@@ -416,6 +485,8 @@ addEventListener('keydown', (e) => {
     if (e.code === 'KeyC') setCamMode((camMode + 1) % camModes.length);
     if (e.code === 'KeyL') ctrl.setLamps(!ctrl.lampsOn);
     if (e.code === 'Escape') exitDrive();
+  } else if (mode === 'rest') {
+    if (e.code === 'Escape') exitRest();
     if (e.code === 'Space') e.preventDefault();
   } else if (e.code === 'Escape') { closeCard(); $('#datasheet').classList.add('hidden'); }
 });
@@ -469,6 +540,9 @@ function wireUI() {
   $('#start-btn').addEventListener('click', startExperience);
   $('#drive-btn').addEventListener('click', enterDrive);
   $('#back-btn').addEventListener('click', exitDrive);
+  $('#rest-btn').addEventListener('click', enterRest);
+  $('#rest-back').addEventListener('click', exitRest);
+  addEventListener('pointermove', (e) => { restLook.tx = (e.clientX / innerWidth - 0.5) * 2; restLook.ty = (e.clientY / innerHeight - 0.5) * 2; });
   $('#engine-btn').addEventListener('click', () => (ctrl.engineOn ? stopEngine() : startEngine()));
   $('#datasheet-btn').addEventListener('click', () => { closeCard(); $('#datasheet').classList.toggle('hidden'); });
   document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => {
@@ -560,6 +634,8 @@ function loop(ts) {
     if (!activeHotspot && idleTimer > 12) controls.autoRotate = true;
     const gy = heightAt(camera.position.x, camera.position.z) + 0.35;
     if (camera.position.y < gy) camera.position.y = gy;
+  } else if (mode === 'rest') {
+    updateRestCamera(dt, t);
   } else if (mode === 'drive') {
     updateDriveCamera(dt);
     $('#speed').textContent = Math.round(ctrl.speedKmh);
@@ -577,12 +653,22 @@ function loop(ts) {
   if (atm && parts) {
     atm.update(t, camera, parts.root.position);
     bloom.strength = atm.state.bloom;
+    // Abend-Wert langsam nachziehen: Dorflichter gehen nach und nach an, Glühwürmchen erwachen
+    shared.uNight.value += (atm.state.lamps - shared.uNight.value) * (1 - Math.exp(-dt / 5));
+    // Lichtstrahlen: je tiefer die Sonne, desto stärker
+    const el = atm.state.sunEl;
+    godrays.updateSun(camera, atm.sunVec, 0.15 + 0.6 * (1 - THREE.MathUtils.smoothstep(el, 6, 45)), atm.state.sunColor);
+    godrays.enabled = godrays.strength > 0.005;
     if (frame % 8 === 0) { grass.update(camera); orchardLod.update(camera); }
     if (mode === 'showroom') hotspots.update(camera, tmpV.copy(parts.root.position).setY(parts.root.position.y + 1), innerWidth, innerHeight);
     const dist = camera.position.distanceTo(parts.root.position);
     const listen = mode === 'drive' ? (camMode === 1 || camMode === 2 ? 1.1 : 0.95) : Math.min(1, Math.max(0.3, 6 / dist));
     const load = mode === 'drive' ? ctrl.input.throttle : Math.min(ctrl.revBoost / 1500, 1);
     audio.update(ctrl.rpm, load, listen);
+    audio.updateDrive({
+      speed: Math.abs(ctrl.v), gear: ctrl.gear, reverse: ctrl.v < -0.1,
+      onPath: pathDist(ctrl.rearAxle.x, ctrl.rearAxle.z) < 1.8, listen: Math.min(listen, 1),
+    });
   }
 
   composer.render();
@@ -608,4 +694,4 @@ function loop(ts) {
 })();
 
 // Für Debugging in der Konsole
-window.__agt = { scene, camera, audio, renderer, composer, get ctrl() { return ctrl; }, get tracks() { return tracks; }, get parts() { return parts; }, wheelPts, get atm() { return atm; }, controls, enterDrive, exitDrive, focusHotspot };
+window.__agt = { scene, camera, audio, renderer, composer, shared, get ctrl() { return ctrl; }, get tracks() { return tracks; }, get parts() { return parts; }, wheelPts, get atm() { return atm; }, controls, enterDrive, exitDrive, focusHotspot };

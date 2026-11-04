@@ -179,3 +179,10 @@ h2 { font-family: var(--display); font-weight: 900; font-size: clamp(2rem, 4vw, 
   background: rgba(16, 18, 12, 0.45); padding: 0.6rem 0.25rem; border-radius: 999px;
   backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
 }
+
+/* ---------- Feierabend ---------- */
+#rest-hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
+#rest-hud .back-btn { pointer-events: auto; }
+.rest-title { position: absolute; left: 50%; bottom: max(2rem, env(safe-area-inset-bottom)); transform: translateX(-50%);
+  font-family: var(--display); font-weight: 500; font-style: italic; font-size: clamp(1.4rem, 3vw, 2rem); letter-spacing: 0.12em;
+  color: var(--cream); opacity: 0.75; text-shadow: 0 2px 24px rgba(0,0,0,0.5); }

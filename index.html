@@ -57,6 +57,7 @@
 
   <nav id="bottombar" class="hud hidden">
     <button class="btn btn-ghost" id="datasheet-btn">Datenblatt</button>
+    <button class="btn btn-ghost" id="rest-btn">🍺 Feierabend</button>
     <button class="btn btn-primary btn-big" id="drive-btn">▶ Probefahrt</button>
     <button class="btn btn-ghost engine-btn attention" id="engine-btn" aria-pressed="false"><span class="engine-led" aria-hidden="true"></span><span id="engine-label">Motor an</span></button>
   </nav>
@@ -82,6 +83,12 @@
     <p class="small">Angaben je nach Ausführung und Ausstattung. Hersteller: Agromehanika d.d., Kranj (Slowenien).</p>
   </section>
 
+
+  <!-- Feierabend-HUD -->
+  <section id="rest-hud" class="hud hidden">
+    <button class="btn btn-ghost back-btn" id="rest-back">← Aufstehen</button>
+    <p class="rest-title">Feierabend.</p>
+  </section>
 
   <!-- Fahr-HUD -->
   <section id="drive-hud" class="hud hidden">
