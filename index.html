@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>AGT 835 – Agromehanika · Der kleine Riese von der Alb</title>
+  <meta name="description" content="Interaktiver 3D-Showroom und Probefahrt: Agromehanika AGT 835 auf der Streuobstwiese am Albtrauf." />
+  <meta name="theme-color" content="#14170f" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;900&family=Dancing+Script:wght@700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='%23d7261e'/><text x='32' y='44' font-size='30' text-anchor='middle' font-family='Arial Black' fill='%23f4ecd8'>835</text></svg>" />
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- Ladebildschirm / Intro -->
+  <section id="loader" class="screen">
+    <div class="loader-inner">
+      <p class="eyebrow">Agromehanika · Kranj · Baujahr 2001</p>
+      <h1 class="mega"><span>AGT</span><span class="red">835</span></h1>
+      <p class="tagline">Der kleine Riese von der Alb</p>
+      <div class="progress"><div class="progress-bar" id="progress-bar"></div></div>
+      <button id="start-btn" class="btn btn-primary" disabled>
+        <span class="key-icon" aria-hidden="true"></span>
+        <span id="start-label">Lädt …</span>
+      </button>
+      <p class="hint">Mit Sound erleben 🔊</p>
+    </div>
+  </section>
+
+  <!-- Showroom-HUD -->
+  <header id="topbar" class="hud hidden">
+    <div class="brand">
+      <span class="brand-mark">AGT 835</span>
+      <span class="brand-sub">Agromehanika</span>
+    </div>
+    <div class="top-actions">
+      <div class="seg" id="preset-switch" role="group" aria-label="Lichtstimmung">
+        <button data-preset="day">Tag</button>
+        <button data-preset="golden" class="active">Goldene Stunde</button>
+        <button data-preset="dusk">Abend</button>
+      </div>
+      <button id="sound-btn" class="icon-btn" aria-label="Ton an/aus" title="Ton an/aus">🔊</button>
+    </div>
+  </header>
+
+  <div id="hotspots" class="hud hidden"></div>
+
+  <aside id="card" class="panel hidden" aria-live="polite">
+    <button class="close" data-close="card" aria-label="Schließen">×</button>
+    <p class="eyebrow" id="card-eyebrow"></p>
+    <h2 id="card-title"></h2>
+    <p id="card-text"></p>
+    <dl id="card-facts" class="facts"></dl>
+  </aside>
+
+  <nav id="bottombar" class="hud hidden">
+    <button class="btn btn-ghost" id="datasheet-btn">Datenblatt</button>
+    <button class="btn btn-primary btn-big" id="drive-btn">▶ Probefahrt</button>
+    <button class="btn btn-ghost engine-btn on" id="engine-btn" aria-pressed="true"><span class="engine-led" aria-hidden="true"></span><span id="engine-label">Motor aus</span></button>
+  </nav>
+
+  <section id="datasheet" class="panel panel-wide hidden">
+    <button class="close" data-close="datasheet" aria-label="Schließen">×</button>
+    <p class="eyebrow">Technische Daten · AGT 835 TS</p>
+    <h2>Klein. Zäh. Allrad.</h2>
+    <dl class="facts facts-grid">
+      <div><dt>Motor</dt><dd>Lombardini LDW 1603, 3-Zyl.-Diesel</dd></div>
+      <div><dt>Hubraum</dt><dd>1.649 cm³</dd></div>
+      <div><dt>Leistung</dt><dd>27 kW / 36,6 PS</dd></div>
+      <div><dt>Antrieb</dt><dd>Permanenter Allrad (4WD)</dd></div>
+      <div><dt>Lenkung</dt><dd>Knicklenkung</dd></div>
+      <div><dt>Getriebe</dt><dd>Synchron-Wendegetriebe, 8 V / 4 R</dd></div>
+      <div><dt>Zapfwelle</dt><dd>Heck, 540 U/min</dd></div>
+      <div><dt>Kraftheber</dt><dd>Dreipunkt hinten, ca. 1.000 kg</dd></div>
+      <div><dt>Gewicht</dt><dd>ca. 1.200–1.940 kg</dd></div>
+      <div><dt>Höchstgeschw.</dt><dd>ca. 30 km/h</dd></div>
+      <div><dt>Wendekreis</dt><dd>ca. 2,9 m</dd></div>
+      <div><dt>Baujahr</dt><dd>ca. 2001</dd></div>
+    </dl>
+    <p class="small">Angaben je nach Ausführung und Ausstattung. Hersteller: Agromehanika d.d., Kranj (Slowenien).</p>
+  </section>
+
+
+  <!-- Fahr-HUD -->
+  <section id="drive-hud" class="hud hidden">
+    <button class="btn btn-ghost back-btn" id="back-btn">← Showroom</button>
+    <div class="gauge">
+      <div class="gauge-speed"><span id="speed">0</span><small>km/h</small></div>
+      <div class="gauge-row">
+        <div class="gear"><small>Gang</small><span id="gear">1</span></div>
+        <div class="rpm"><small>U/min</small><div class="rpm-bar"><div id="rpm-fill"></div></div><span id="rpm">900</span></div>
+      </div>
+    </div>
+    <div class="drive-help" id="drive-help">
+      <b>W/S</b> Gas · Bremse/Rückwärts&nbsp;&nbsp;<b>A/D</b> Knicklenkung&nbsp;&nbsp;<b>Leertaste</b> Bremse&nbsp;&nbsp;<b>H</b> Hupe&nbsp;&nbsp;<b>C</b> Kamera&nbsp;&nbsp;<b>L</b> Licht
+    </div>
+    <div class="touch" id="touch">
+      <div class="stick" id="stick"><div class="stick-knob" id="stick-knob"></div></div>
+      <div class="pedals">
+        <button id="t-brake" class="pedal">◀ R</button>
+        <button id="t-gas" class="pedal pedal-gas">GAS ▶</button>
+      </div>
+    </div>
+  </section>
+
+  <div id="toast" class="toast hidden"></div>
+  <div id="fade" class="screen fade hidden"></div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
