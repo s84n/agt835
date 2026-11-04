@@ -111,8 +111,8 @@ export function createRestArea(x, z, rotY) {
     apples.setColorAt(i, cols[Math.floor(rnd() * 3)]);
   }
   for (; i < N; i++) { // Fallobst im Gras
-    const a = rnd() * Math.PI * 2, r = 0.8 + rnd() * 2.6;
-    const lx = Math.cos(a) * r, lz = Math.sin(a) * r - 1.0;
+    const a = rnd() * Math.PI * 2, r = 0.6 + rnd() * 2.4;
+    const lx = Math.cos(a) * r, lz = Math.sin(a) * r * 0.8 - 2.6;
     const wx = x + lx * Math.cos(rotY) + lz * Math.sin(rotY), wz = z - lx * Math.sin(rotY) + lz * Math.cos(rotY);
     p.set(lx, heightAt(wx, wz) - group.position.y + 0.03, lz);
     q.setFromEuler(new THREE.Euler(rnd() * 3, rnd() * 3, 0));
@@ -145,15 +145,41 @@ export function createRestArea(x, z, rotY) {
   bottles.castShadow = true;
   beer.add(bottles);
   group.add(beer);
+  // kleiner Biertisch vor der Bank, darauf die offene Flasche und ein paar Äpfel
+  const table = new THREE.Group();
+  table.position.set(0, 0, 0.78);
+  const top = [];
+  for (let i = 0; i < 4; i++) top.push(box(1.2, 0.035, 0.13, 0, 0.72, -0.21 + i * 0.14));
+  const tTop = new THREE.Mesh(mergeGeometries(top), woodMat);
+  const legs = [];
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const g = new THREE.BoxGeometry(0.035, 0.74, 0.035);
+      g.rotateX(sz * 0.18); g.translate(sx * 0.5, 0.36, sz * 0.12);
+      legs.push(g);
+    }
+    legs.push(box(0.035, 0.035, 0.4, sx * 0.5, 0.2, 0));
+  }
+  const tLegs = new THREE.Mesh(mergeGeometries(legs), metal);
+  for (const o of [tTop, tLegs]) { o.castShadow = true; o.receiveShadow = true; table.add(o); }
+  group.add(table);
   const openBottle = new THREE.Mesh(bottle, glass);
-  openBottle.position.set(0.55, 0.47, 0.02);
+  openBottle.position.set(0.28, 0.74, 0.86);
   openBottle.castShadow = true;
   group.add(openBottle);
+  const tableApples = new THREE.InstancedMesh(appleGeo, appleMat, 3);
+  [[-0.3, 0.76, 0.72], [-0.22, 0.76, 0.8], [-0.36, 0.76, 0.84]].forEach(([ax, ay, az], k) => {
+    tableApples.setMatrixAt(k, m4.compose(p.set(ax, ay, az), q.setFromEuler(new THREE.Euler(k, k * 2, 0)), s));
+    tableApples.setColorAt(k, cols[k]);
+  });
+  tableApples.castShadow = true;
+  group.add(tableApples);
 
   // Kamera: auf der Bank sitzend, Blick über Traktor und Tal
   // leicht hinter und über der Bank (Schulterblick): Bank, Kiste und Bierkasten im Vordergrund
-  const seat = new THREE.Vector3(-0.9, 1.75, -2.1);
-  const lookLocal = new THREE.Vector3(0.6, 0.35, 6.0);
+  // auf der Bank sitzend: Augenhöhe ~1,2 m, Blick über den Tisch zum Traktor
+  const seat = new THREE.Vector3(-0.1, 1.2, 0.02);
+  const lookLocal = new THREE.Vector3(0, 0.62, 5.0);
   group.updateMatrixWorld(true);
   const seatWorld = group.localToWorld(seat.clone());
   const lookWorld = group.localToWorld(lookLocal.clone());
@@ -161,7 +187,7 @@ export function createRestArea(x, z, rotY) {
   const obstacles = [
     { x: group.localToWorld(new THREE.Vector3(0, 0, 0)).x, z: group.localToWorld(new THREE.Vector3(0, 0, 0)).z, r: 0.95 },
   ];
-  for (const o of [appleCrate.position, beer.position]) {
+  for (const o of [appleCrate.position, beer.position, table.position]) {
     const w = group.localToWorld(o.clone());
     obstacles.push({ x: w.x, z: w.z, r: 0.35 });
   }

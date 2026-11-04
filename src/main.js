@@ -113,7 +113,9 @@ async function build() {
   orchardLod = orchard.lod;
   obstacles.push(...orchard.obstacles);
   // Feierabend-Bank unter dem Obstbaum bei (12, 14), Blick Richtung Traktor und Tal
-  rest = createRestArea(11.0, 12.1, Math.atan2(-11.0, -12.1));
+  // Bank schräg vor dem Traktor (Dreiviertel-Frontansicht, ~4 m bis zur Front)
+  { const a = STAGE_HEADING + 0.62, r = 5.6, bx = Math.sin(a) * r, bz = Math.cos(a) * r;
+    rest = createRestArea(bx, bz, Math.atan2(-bx, -bz)); }
   scene.add(rest.group);
   obstacles.push(...rest.obstacles);
   scene.add(createButterflies(Q.name === 'low' ? 14 : 26), createFireflies(Q.name === 'low' ? 80 : 140));
@@ -326,7 +328,7 @@ function enterRest() {
       camera.position.y += Math.sin(p.t * Math.PI) * 2.2;
       camera.lookAt(lookFrom.clone().lerp(rest.lookWorld, p.t));
     },
-    onComplete: () => { mode = 'rest'; $('#rest-hud').classList.remove('hidden'); },
+    onComplete: () => { mode = 'rest'; restLook.x = restLook.tx; restLook.y = restLook.ty = 0; $('#rest-hud').classList.remove('hidden'); },
   });
 }
 function exitRest() {
@@ -355,8 +357,8 @@ function updateRestCamera(dt, t) {
   camera.position.copy(rest.seatWorld);
   camera.position.y += Math.sin(t * 0.9) * 0.012;
   const dir = rest.lookWorld.clone().sub(rest.seatWorld);
-  dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), -restLook.x * 0.6);
-  dir.y -= restLook.y * 2.2;
+  dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), -restLook.x * 0.7);
+  dir.y -= restLook.y * 1.4;
   camera.lookAt(rest.seatWorld.clone().add(dir));
 }
 

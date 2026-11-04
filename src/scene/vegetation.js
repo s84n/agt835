@@ -267,7 +267,9 @@ export function createOrchard(quality) {
     }
   }
   // Ein paar markante Bäume nahe der Bühne (wie auf den Fotos)
-  spots.push([-13, -9], [12, 14], [-19, 15], [21, -16]);
+  // markante Bäume nahe der Bühne; einer steht hinter der Feierabend-Bank
+  const ba = 1.2 + 0.62, br = 9.4;
+  spots.push([-13, -9], [Math.sin(ba) * br, Math.cos(ba) * br], [-19, 15], [21, -16], [12, 14]);
 
   const leafMap = leafTexture();
   const woodMat = windMaterial({ vertexColors: true }, 0.035, 1.8, { bark: true });
