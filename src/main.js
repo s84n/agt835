@@ -98,7 +98,6 @@ controls.minDistance = 2.6;
 controls.maxDistance = 15;
 controls.minPolarAngle = 0.25;
 controls.maxPolarAngle = 1.52;
-controls.autoRotateSpeed = 0.35;
 controls.rotateSpeed = 0.6;
 
 // ---------- Welt aufbauen (mit Fortschrittsanzeige) ----------
@@ -222,13 +221,90 @@ async function startExperience() {
     onComplete: () => {
       controls.target.copy(DEFAULT_TARGET);
       controls.enabled = true;
-      controls.autoRotate = true;
       mode = 'showroom';
       showShowroomUI(true);
+      startAutoCam();
       if (!ctrl.engineOn) setTimeout(() => !ctrl.engineOn && toast('Tipp: Lass den Motor an – unten rechts.'), 900);
     },
   });
   gsap.delayedCall(params.has('fast') ? 0.1 : 3.4, () => loader.classList.add('hidden'));
+}
+
+// ---------- Showroom-Regie: wechselnde Einstellungen, immer auf den Traktor ----------
+// a = Winkel um den Traktor (0 = von vorn), d = Abstand, h = Kamerahöhe, ty/tz = Blickpunkt am Traktor
+const SHOTS = [
+  { a: 0.65, d: 6.2, h: 1.7, ty: 0.95, tz: 0 },     // Dreiviertel von vorn
+  { a: 0.32, d: 3.0, h: 0.55, ty: 0.65, tz: 0.7 },  // ganz nah, tief am Vorderrad
+  { a: 1.57, d: 10.5, h: 1.1, ty: 0.9, tz: 0 },     // Seite, weit weg
+  { a: -1.35, d: 3.3, h: 1.9, ty: 1.35, tz: -0.3 }, // nah am Fahrerplatz
+  { a: 2.45, d: 6.8, h: 2.2, ty: 0.9, tz: 0 },      // Dreiviertel von hinten, leicht erhöht
+  { a: 3.05, d: 3.2, h: 1.0, ty: 0.75, tz: -1.0 },  // nah an Heck und Hubwerk
+  { a: -0.85, d: 10.5, h: 5.5, ty: 0.8, tz: 0 },    // Übersicht von oben
+  { a: -0.12, d: 8.5, h: 1.25, ty: 0.95, tz: 0 },   // frontal, mittlere Distanz
+  { a: -2.2, d: 4.2, h: 0.7, ty: 1.0, tz: -0.6 },   // tief von hinten links
+];
+const autoCam = { on: false, cur: null, from: null, to: null, idx: -1, t: 0, glide: 0, hold: 0 };
+const wrapAngle = (x) => Math.atan2(Math.sin(x), Math.cos(x));
+
+function camToShot() {
+  // aktuelle Kamera in Traktor-Koordinaten umrechnen
+  const local = parts.root.worldToLocal(camera.position.clone());
+  const tLocal = parts.root.worldToLocal(controls.target.clone());
+  const dx = local.x - tLocal.x, dz = local.z - tLocal.z;
+  return { a: Math.atan2(dx, dz), d: Math.max(Math.hypot(dx, dz), 2.6), h: local.y, ty: tLocal.y, tz: tLocal.z };
+}
+function applyShot(s) {
+  const tgt = parts.root.localToWorld(new THREE.Vector3(0, s.ty, s.tz));
+  const pos = parts.root.localToWorld(new THREE.Vector3(Math.sin(s.a) * s.d, s.h, s.tz + Math.cos(s.a) * s.d));
+  pos.y = Math.max(pos.y, heightAt(pos.x, pos.z) + 0.35);
+  camera.position.copy(pos);
+  controls.target.copy(tgt);
+  camera.lookAt(tgt);
+}
+function nextShot() {
+  let i;
+  do i = Math.floor(Math.random() * SHOTS.length); while (i === autoCam.idx);
+  autoCam.idx = i;
+  const to = { ...SHOTS[i] };
+  const from = autoCam.cur;
+  // großer Sprung um den Traktor → harter Schnitt, sonst sanfte Fahrt
+  const da = Math.abs(wrapAngle(to.a - from.a));
+  autoCam.glide = da > 1.3 ? 0 : 3.2;
+  autoCam.from = { ...from };
+  autoCam.to = to;
+  autoCam.t = 0;
+  autoCam.hold = 6.5 + Math.random() * 3;
+}
+function startAutoCam() {
+  if (mode !== 'showroom' || activeHotspot) return;
+  autoCam.on = true;
+  autoCam.cur = camToShot();
+  autoCam.idx = -1;
+  nextShot();
+  autoCam.glide = 3.2; // aus der Hand des Besuchers immer weich übernehmen
+}
+function stopAutoCam() {
+  autoCam.on = false;
+  idleTimer = 0;
+}
+function updateAutoCam(dt) {
+  const A = autoCam;
+  A.t += dt;
+  const { from, to } = A;
+  if (A.glide > 0 && A.t < A.glide) {
+    const k = A.t / A.glide, e = k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2;
+    const lerp = THREE.MathUtils.lerp;
+    A.cur = {
+      a: from.a + wrapAngle(to.a - from.a) * e, d: lerp(from.d, to.d, e), h: lerp(from.h, to.h, e),
+      ty: lerp(from.ty, to.ty, e), tz: lerp(from.tz, to.tz, e),
+    };
+  } else {
+    // stehende Einstellung mit ganz langsamem Heranfahren, keine Drehung
+    const held = A.t - A.glide;
+    A.cur = { ...to, d: to.d * (1 - 0.05 * Math.min(held / A.hold, 1)) };
+    if (held > A.hold) nextShot();
+  }
+  applyShot(A.cur);
 }
 
 // ---------- Motor an/aus ----------
@@ -268,8 +344,7 @@ function focusHotspot(h) {
   if (mode !== 'showroom') return;
   activeHotspot = h;
   hotspots.setActive(h.id);
-  controls.autoRotate = false;
-  idleTimer = 0;
+  stopAutoCam();
   const target = parts.anchors[h.id].getWorldPosition(new THREE.Vector3());
   const camPos = parts.root.localToWorld(new THREE.Vector3(...h.cam));
   camPos.y = Math.max(camPos.y, heightAt(camPos.x, camPos.z) + 0.5);
@@ -351,7 +426,7 @@ function enterRest() {
   closeCard();
   $('#datasheet').classList.add('hidden');
   showShowroomUI(false);
-  controls.enabled = false; controls.autoRotate = false;
+  controls.enabled = false; stopAutoCam();
   const from = camera.position.clone(), lookFrom = controls.target.clone();
   const p = { t: 0 };
   gsap.to(p, {
@@ -426,7 +501,7 @@ function enterDrive() {
   $('#datasheet').classList.add('hidden');
   showShowroomUI(false);
   controls.enabled = false;
-  controls.autoRotate = false;
+  stopAutoCam();
   ctrl.phiTarget = 0;
   const { pos, look } = chaseTarget();
   const lookNow = controls.target.clone();
@@ -464,8 +539,8 @@ function exitDrive() {
     camera.position.copy(DEFAULT_CAM);
     controls.target.copy(DEFAULT_TARGET);
     controls.enabled = true;
-    controls.autoRotate = true;
     controls.update();
+    startAutoCam();
     fade.classList.add('hidden');
     mode = 'showroom';
     showShowroomUI(true);
@@ -761,7 +836,7 @@ function wireUI() {
     audio.setMuted(!audio.muted);
     $('#sound-btn').textContent = audio.muted ? '🔇' : '🔊';
   });
-  controls.addEventListener('start', () => { controls.autoRotate = false; idleTimer = 0; });
+  controls.addEventListener('start', stopAutoCam);
   setupTouch();
 }
 
@@ -829,9 +904,10 @@ function loop(ts) {
   }
 
   if (window.__freeze) { /* Debug: Kamera frei */ } else if (mode === 'showroom') {
-    controls.update();
     idleTimer += dt;
-    if (!activeHotspot && idleTimer > 12) controls.autoRotate = true;
+    if (!autoCam.on && !activeHotspot && idleTimer > 12) startAutoCam();
+    if (autoCam.on) updateAutoCam(dt);
+    else controls.update();
     const gy = heightAt(camera.position.x, camera.position.z) + 0.35;
     if (camera.position.y < gy) camera.position.y = gy;
   } else if (mode === 'rest') {

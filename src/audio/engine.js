@@ -175,8 +175,10 @@ export class EngineAudio {
     { const d = white.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
     const windLow = mkNoise();
     const wlp = ctx.createBiquadFilter(); wlp.type = 'lowpass'; wlp.frequency.value = 380; wlp.Q.value = 0.5;
-    const wg = ctx.createGain(); wg.gain.value = 0.05;
-    windLow.connect(wlp).connect(wg).connect(this.ambient);
+    // Hochpass nimmt das tiefe Dauerbrummen raus, übrig bleibt ein luftiges Rauschen
+    const whp = ctx.createBiquadFilter(); whp.type = 'highpass'; whp.frequency.value = 150; whp.Q.value = 0.5;
+    const wg = ctx.createGain(); wg.gain.value = 0.018;
+    windLow.connect(whp).connect(wlp).connect(wg).connect(this.ambient);
     const leaves = ctx.createBufferSource(); leaves.buffer = white; leaves.loop = true; leaves.start();
     const lbp = ctx.createBiquadFilter(); lbp.type = 'bandpass'; lbp.frequency.value = 4200; lbp.Q.value = 0.6;
     const lhp = ctx.createBiquadFilter(); lhp.type = 'highpass'; lhp.frequency.value = 1800;
@@ -186,7 +188,7 @@ export class EngineAudio {
     const gust = () => {
       if (!this.ctx) return;
       const t = ctx.currentTime, k = Math.random();
-      wg.gain.setTargetAtTime(0.025 + k * 0.05, t, rnd(1.2, 3));
+      wg.gain.setTargetAtTime(0.008 + k * 0.022, t, rnd(1.2, 3));
       wlp.frequency.setTargetAtTime(260 + k * 380, t, 2);
       lg.gain.setTargetAtTime(0.0012 + k * k * 0.0075, t, rnd(0.8, 2));
       setTimeout(gust, rnd(2500, 7000));
