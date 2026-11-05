@@ -873,7 +873,7 @@ export function createPond(quality, audio) {
   }
 
   return {
-    group, obstacles, seatWorld, lookWorld, parkWorld, hide, ripple,
+    group, obstacles, seatWorld, lookWorld, parkWorld, hide, ripple, water,
     update, throwStone, showHand,
     set onResult(fn) { onResult = fn; },
     get busy() { return stones.some((s) => !s.done); },

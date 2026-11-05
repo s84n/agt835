@@ -262,6 +262,7 @@ export function createTractor() {
 
   // Überrollbügel (vorne montiert, wie beim AGT 835) mit Spiegeln
   const barZ = 0.42;
+  const mirrorGlasses = [];
   tube([[-0.35, 0.72, barZ], [-0.35, 1.5, barZ], [-0.35, 1.95, barZ - 0.01], [-0.28, 2.07, barZ - 0.02], [0, 2.1, barZ - 0.02], [0.28, 2.07, barZ - 0.02], [0.35, 1.95, barZ - 0.01], [0.35, 1.5, barZ], [0.35, 0.72, barZ]], 0.032, M.plastic, front, 80);
   for (const s of [-1, 1]) {
     mesh(box(0.09, 0.12, 0.08, 0.01), M.darkMetal, s * 0.33, 0.75, barZ, front);
@@ -269,10 +270,19 @@ export function createTractor() {
     tube([[s * 0.35, 1.72, barZ], [s * 0.52, 1.74, barZ - 0.02], [s * 0.6, 1.8, barZ - 0.03]], 0.01, M.steel, front, 10);
     const mir = new THREE.Group();
     mir.position.set(s * 0.62, 1.86, barZ - 0.03);
-    mir.rotation.y = s * 0.2;
     front.add(mir);
+    // wie vom Fahrer eingestellt: vom Sitz aus sieht man schräg nach hinten auf Weg und Anhänger.
+    // Spiegelnormale = Winkelhalbierende zwischen Richtung zum Auge und gewünschter Blickrichtung
+    const eye = new THREE.Vector3(0, 1.72, -0.5);
+    const toEye = eye.clone().sub(mir.position).normalize();
+    const behind = new THREE.Vector3(s * 0.12, -0.04, -1).normalize();
+    const n = toEye.add(behind).normalize();
+    mir.lookAt(mir.position.clone().sub(n)); // Glas zeigt entlang -z der Gruppe
     mesh(box(0.15, 0.24, 0.035, 0.03), M.plastic, 0, 0, 0, mir);
-    mesh(new THREE.PlaneGeometry(0.13, 0.22), M.chrome, 0, 0, -0.019, mir).rotation.y = Math.PI;
+    const glass = mesh(new THREE.PlaneGeometry(0.13, 0.22), M.chrome, 0, 0, -0.019, mir);
+    glass.rotation.y = Math.PI;
+    glass.name = 'Spiegelglas';
+    mirrorGlasses.push(glass);
   }
 
   // ===================== HINTERWAGEN =====================
@@ -426,7 +436,7 @@ export function createTractor() {
 
   return {
     root, body, front, rear, engineShake, wheels, steeringWheel, levers, pto, hitch, lowerLinks, topLink, liftRods,
-    headlights, exhaust, anchors, materials: M,
+    headlights, exhaust, anchors, materials: M, mirrorGlasses,
   };
 }
 

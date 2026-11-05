@@ -39,22 +39,45 @@ const box = (w, h, d, x, y, z, ry = 0) => {
   return g;
 };
 
+// Parkbank mit gusseisernen Seitenteilen. Alle Teile berühren sich wirklich:
+// Fuß → Bein → Sitzauflage → Latten, Hinterbein → schräge Lehnenstrebe → Lehnenlatten,
+// Vorderbein bis unter die Armlehne, Armlehne endet an der Lehnenstrebe.
+// Wird für die Feierabend-Ecke und die Aussichtsbank verwendet.
 export function bench(mat, metal) {
   const wood = [], iron = [];
-  // Sitz: 3 Latten
-  for (let i = 0; i < 3; i++) wood.push(box(1.7, 0.035, 0.11, 0, 0.45, -0.13 + i * 0.13));
-  // Lehne: 2 Latten, leicht nach hinten geneigt
-  for (let i = 0; i < 2; i++) {
-    const g = new THREE.BoxGeometry(1.7, 0.1, 0.03);
-    g.rotateX(-0.22); g.translate(0, 0.66 + i * 0.16, -0.24 - i * 0.035);
-    wood.push(g);
-  }
-  // Gusseiserne Seitenteile
+  const FX = 0.78;                 // Seitenteile bei x = ±0.78
+  const SEAT = 0.435;              // Oberkante Sitzauflage
+  const BACK0 = { y: 0.41, z: -0.22 }, BACK1 = { y: 0.9, z: -0.335 }; // Lehnenstrebe unten/oben
+  const tilt = Math.atan2(BACK1.z - BACK0.z, BACK1.y - BACK0.y);     // negativ: lehnt nach hinten
+  const backZ = (y) => BACK0.z + (y - BACK0.y) * Math.tan(tilt);
+  const bar = (w, h, d, x, y, z, rx = 0) => {
+    const g = new THREE.BoxGeometry(w, h, d);
+    if (rx) g.rotateX(rx);
+    g.translate(x, y, z);
+    return g;
+  };
   for (const s of [-1, 1]) {
-    iron.push(box(0.05, 0.45, 0.05, s * 0.75, 0.225, 0.14));
-    iron.push(box(0.05, 0.86, 0.05, s * 0.75, 0.43, -0.22));
-    iron.push(box(0.05, 0.05, 0.42, s * 0.75, 0.42, -0.04));
-    iron.push(box(0.05, 0.04, 0.34, s * 0.75, 0.62, 0.0));
+    const x = s * FX;
+    iron.push(bar(0.05, 0.68, 0.05, x, 0.34, 0.19));                       // Vorderbein bis zur Armlehne
+    iron.push(bar(0.05, SEAT, 0.05, x, SEAT / 2, BACK0.z));               // Hinterbein bis zur Sitzauflage
+    const len = Math.hypot(BACK1.y - BACK0.y, BACK1.z - BACK0.z);
+    iron.push(bar(0.05, len + 0.03, 0.05, x, (BACK0.y + BACK1.y) / 2, (BACK0.z + BACK1.z) / 2, tilt)); // Lehnenstrebe
+    iron.push(bar(0.05, 0.05, 0.47, x, SEAT - 0.025, -0.015));            // Sitzauflage vorn–hinten
+    const az = backZ(0.68);
+    iron.push(bar(0.065, 0.04, 0.215 - az + 0.03, x, 0.7, (az + 0.215) / 2 - 0.0)); // Armlehne
+    for (const z of [0.19, BACK0.z]) iron.push(bar(0.08, 0.02, 0.11, x, 0.01, z)); // Füße
+  }
+  iron.push(bar(2 * FX, 0.04, 0.04, 0, 0.13, BACK0.z));                   // Querstrebe hinten
+  iron.push(bar(2 * FX, 0.04, 0.04, 0, 0.13, 0.19));                      // Querstrebe vorn
+  iron.push(bar(0.04, 0.05, 0.47, 0, SEAT - 0.025, -0.015));              // Mittelauflage unter den Latten
+  // Sitz: 4 Latten auf der Auflage, 2 cm Fuge
+  // (hinterste Latte endet genau vor der Lehnenstrebe)
+  const SW = 0.095, GAP = 0.018, ST = 0.035;
+  for (let i = 0; i < 4; i++) wood.push(bar(1.8, ST, SW, 0, SEAT + ST / 2, 0.225 - SW / 2 - i * (SW + GAP)));
+  // Lehne: 3 Latten vorn auf der Strebe verschraubt, gleiche Neigung
+  for (const y of [0.55, 0.69, 0.83]) {
+    const off = 0.025 + 0.016; // halbe Strebe + halbe Latte
+    wood.push(bar(1.8, 0.11, 0.032, 0, y, backZ(y) + off * Math.cos(tilt), tilt));
   }
   const g = new THREE.Group();
   const w = new THREE.Mesh(mergeGeometries(wood), mat);

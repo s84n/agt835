@@ -24,6 +24,7 @@ import { createOrchard, createForest, createWoodpile, Grass, shared } from './sc
 import { createVillage } from './scene/village.js';
 import { createTractor } from './tractor/model.js';
 import { TractorController } from './tractor/controller.js';
+import { Mirrors } from './tractor/mirrors.js';
 import { grimeShared } from './tractor/grime.js';
 import { EngineAudio } from './audio/engine.js';
 import { HotspotLayer } from './ui/hotspots.js';
@@ -106,6 +107,7 @@ const tick = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 
 const progress = (p) => ($('#progress-bar').style.width = `${Math.round(p * 100)}%`);
 
 let atm, grass, parts, ctrl, hotspots, orchardLod, tracks, rest, pond, village, viewpoint, obstacles = [];
+let mirrors;
 let spots = []; // Plätze zum Absteigen: Steg am Weiher, Bank über dem Dorf
 const wheelPts = [0, 1, 2, 3].map(() => new THREE.Vector3());
 const STAGE_HEADING = 1.2;
@@ -174,6 +176,7 @@ async function build() {
   ctrl.reset(0, 0, STAGE_HEADING);
   scene.add(ctrl.particles.points);
   pond.hide.push(ctrl.particles.points);
+  mirrors = new Mirrors(parts.mirrorGlasses, Q);
   let lastLamps = 0;
   atm.onLamps = (l) => { const on = l > 0.5 ? 1 : 0; if (on !== lastLamps) { lastLamps = on; ctrl.setLamps(!!on); } };
 
@@ -879,6 +882,11 @@ function loop(ts) {
     });
   }
 
+  // Rückspiegel: Gras und Rauch weglassen, das Wasser nur in der Nähe des Weihers
+  if (mirrors && mode !== 'loading' && mode !== 'ready') {
+    const nearPondCam = Math.hypot(camera.position.x - pond.seatWorld.x, camera.position.z - pond.seatWorld.z) < 60;
+    mirrors.update(renderer, scene, camera, nearPondCam ? [grass.group, ctrl.particles.points] : [grass.group, ctrl.particles.points, pond.water]);
+  }
   composer.render();
   requestAnimationFrame(loop);
 }
