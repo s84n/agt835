@@ -6,9 +6,6 @@
   <title>AGT 835 – Agromehanika · Der kleine Riese von der Alb</title>
   <meta name="description" content="Interaktiver 3D-Showroom und Probefahrt: Agromehanika AGT 835 auf der Streuobstwiese am Albtrauf." />
   <meta name="theme-color" content="#14170f" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;900&family=Dancing+Script:wght@700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='%23d7261e'/><text x='32' y='44' font-size='30' text-anchor='middle' font-family='Arial Black' fill='%23f4ecd8'>835</text></svg>" />
 </head>
 <body>
@@ -90,6 +87,18 @@
     <p class="rest-title">Feierabend.</p>
   </section>
 
+  <!-- Weiher-HUD -->
+  <section id="pond-hud" class="hud hidden">
+    <button class="btn btn-ghost back-btn" id="pond-back">← Zum Traktor</button>
+    <div class="skip-score" aria-live="polite">
+      <div><small>Letzter Wurf</small><span id="skip-last">–</span></div>
+      <div><small>Rekord</small><span id="skip-record">0</span></div>
+    </div>
+    <div class="power" id="power"><div class="power-fill" id="power-fill"></div></div>
+    <p class="pond-help">Umschauen mit der Maus · <b>Maustaste</b> oder <b>Leertaste</b> halten und loslassen: Stein flitschen · flach werfen!</p>
+    <button class="btn btn-primary throw-btn" id="throw-btn">Halten &amp; loslassen</button>
+  </section>
+
   <!-- Fahr-HUD -->
   <section id="drive-hud" class="hud hidden">
     <button class="btn btn-ghost back-btn" id="back-btn">← Showroom</button>
@@ -101,8 +110,9 @@
       </div>
     </div>
     <div class="drive-help" id="drive-help">
-      <b>W/S</b> Gas · Bremse/Rückwärts&nbsp;&nbsp;<b>A/D</b> Knicklenkung&nbsp;&nbsp;<b>Leertaste</b> Bremse&nbsp;&nbsp;<b>H</b> Hupe&nbsp;&nbsp;<b>C</b> Kamera&nbsp;&nbsp;<b>L</b> Licht
+      <b>W/S</b> Gas · Bremse/Rückwärts&nbsp;&nbsp;<b>A/D</b> Knicklenkung&nbsp;&nbsp;<b>Leertaste</b> Bremse&nbsp;&nbsp;<b>H</b> Hupe&nbsp;&nbsp;<b>C</b> Kamera&nbsp;&nbsp;<b>L</b> Licht&nbsp;&nbsp;<b>E</b> am Weiher absteigen
     </div>
+    <button class="btn btn-primary pond-btn hidden" id="pond-btn">🪨 Am Steg sitzen <kbd>E</kbd></button>
     <div class="touch" id="touch">
       <div class="stick" id="stick"><div class="stick-knob" id="stick-knob"></div></div>
       <div class="pedals">

@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { heightAt, forestMask, villageMask, pathDist } from './terrain.js';
-import { seeded, fbm, noise2, smoothstep } from './noise.js';
+import { heightAt, forestMask, villageMask, pathDist, pondE } from './terrain.js';
+import { TRACK_MAP_WORLD } from './tracks.js';
+import { seeded, fbm, noise2, smoothstep, hash2 } from './noise.js';
 import { leafTexture, logEndTexture, barkTexture } from './textures.js';
 import { NOISE } from '../tractor/grime.js';
 
@@ -51,7 +52,7 @@ const WIND_GLSL = (strength, pivot, flutter) => `
   ${flutter ? `transformed += normal * sin(uTime * 5.0 + position.x * 4.0 + position.z * 3.0 + ip.x) * 0.025 * min(hw, 1.0);` : ''}
 `;
 
-function windMaterial(opts, strength = 0.05, pivot = 1.6, { bark = false, leaves = false } = {}) {
+export function windMaterial(opts, strength = 0.05, pivot = 1.6, { bark = false, leaves = false } = {}) {
   const m = new THREE.MeshLambertMaterial(opts);
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = shared.uTime;
@@ -260,6 +261,7 @@ export function createOrchard(quality) {
       const r = Math.hypot(x, z);
       if (r < 17) continue;                         // Bühne frei lassen
       if (pathDist(x, z) < 4.5) continue;           // Feldweg frei
+      if (pondE(x, z) < 1.9) continue;              // Weiher und Platz am Steg frei
       if (forestMask(x, z) > 0.3) continue;
       if (fbm(x / 90, z / 90, 2) > 0.35) continue;  // offene Wiesenflächen
       if (rnd() < 0.18) continue;
@@ -595,7 +597,7 @@ function grassMaterial(fadeStart, fadeEnd, swayAmt) {
           transformed.xz += normalize(d + 0.0001) * f * 0.35 * hgt;
         }
         // gefahrene Bahnen bleiben niedergedrückt
-        float trail = texture2D(uTrail, aOffset.xz / 240.0 + 0.5).r;
+        float trail = texture2D(uTrail, aOffset.xz / ${TRACK_MAP_WORLD.toFixed(1)} + 0.5).r;
         transformed.y *= 1.0 - trail * 0.78;
         transformed += aOffset.xyz;
       `)
@@ -608,75 +610,133 @@ function grassMaterial(fadeStart, fadeEnd, swayAmt) {
   return m;
 }
 
+// Gras als Kachel-Pool, der mit der Kamera mitwandert: so wächst überall Gras, wo man hinfährt,
+// ohne dass mehr Halme gezeichnet werden. Jede Kachel wird deterministisch aus ihrer Zellnummer
+// befüllt (gleiche Stelle = gleiches Gras), pro Aufruf nur wenige Kacheln, damit nichts ruckelt.
 export class Grass {
   constructor(quality) {
     this.group = new THREE.Group();
     const rnd = seeded(42);
-    const tile = 16, R = quality.grassRadius;
-    const perTile = quality.grassPerTile;
-    const clumps = [bladeClump(rnd, 7), bladeClump(rnd, 6), bladeClump(rnd, 8)];
-    const flower = flowerClump(rnd);
-    const mat = grassMaterial(R * 0.55, R * 0.95, 0.09);
-    const fmat = grassMaterial(R * 0.45, R * 0.8, 0.06);
-    this.tiles = [];
-    const green = new THREE.Color('#79a23a'), dry = new THREE.Color('#b4ab60'), dark = new THREE.Color('#5d8a2e');
-    const c = new THREE.Color();
-    let ti = 0;
-    for (let tx = -R; tx < R; tx += tile) {
-      for (let tz = -R; tz < R; tz += tile) {
-        const cx = tx + tile / 2, cz = tz + tile / 2;
-        if (Math.hypot(cx, cz) > R + tile) continue;
-        const geoBase = clumps[ti++ % clumps.length];
-        const offs = [], tints = [], foffs = [], ftints = [];
-        for (let i = 0; i < perTile; i++) {
-          const x = tx + rnd() * tile, z = tz + rnd() * tile;
-          const pd = pathDist(x, z);
-          if (pd < 1.45 && pd > 0.35) continue;      // Fahrspuren frei
-          const dens = fbm(x / 25, z / 25, 2);
-          if (dens < -0.35 && rnd() < 0.6) continue;
-          const y = heightAt(x, z);
-          let scale = (0.5 + rnd() * 0.35) * (1 + 0.3 * smoothstep(-0.2, 0.6, dens));
-          if (pd <= 0.35) scale *= 0.55;
-          const dryness = smoothstep(0.0, 0.9, fbm(x / 60 + 3, z / 60, 2) * 0.5 + 0.5 + (rnd() - 0.5) * 0.35);
-          c.copy(green).lerp(dry, dryness * 0.6).lerp(dark, rnd() * 0.35);
-          offs.push(x, y - 0.02, z, Math.floor(scale * 100) + rnd() * 0.999);
-          tints.push(c.r * 1.12, c.g * 1.12, c.b * 1.12);
-          // Wiesenblumen in Nestern
-          if (noise2(x / 9, z / 9) > 0.45 && rnd() < 0.18) {
-            foffs.push(x + 0.2, y - 0.02, z + 0.1, Math.floor((0.8 + rnd() * 0.5) * 100) + rnd() * 0.999);
-            ftints.push(1, 1, rnd() < 0.15 ? 0.6 : 1);
-          }
-        }
-        this.tiles.push(this.makeTile(geoBase, mat, offs, tints, cx, cz, tile));
-        if (foffs.length) this.tiles.push(this.makeTile(flower, fmat, foffs, ftints, cx, cz, tile, true));
+    this.tile = 16;
+    this.R = quality.grassRadius;
+    this.perTile = quality.grassPerTile;
+    this.flowerCap = Math.ceil(this.perTile * 0.2);
+    this.clumps = [bladeClump(rnd, 7), bladeClump(rnd, 6), bladeClump(rnd, 8)];
+    this.flower = flowerClump(rnd);
+    this.mat = grassMaterial(this.R * 0.55, this.R * 0.95, 0.09);
+    this.fmat = grassMaterial(this.R * 0.45, this.R * 0.8, 0.06);
+    this.reach = this.R + this.tile * 0.75;
+    const span = Math.ceil(this.reach / this.tile) + 1;
+    // so viele Plätze, wie Zellen höchstens gleichzeitig im Radius liegen
+    let count = 0;
+    for (let i = -span; i <= span; i++) for (let j = -span; j <= span; j++) {
+      if (Math.hypot(Math.max(0, Math.abs(i) - 1) * this.tile, Math.max(0, Math.abs(j) - 1) * this.tile) <= this.reach) count++;
+    }
+    this.span = span;
+    this.slots = [];
+    for (let k = 0; k < count; k++) this.slots.push(this.makeSlot(k));
+    this.cells = new Map();
+    this.last = null;
+    this.update({ position: new THREE.Vector3(0, 0, 0) }, Infinity);
+  }
+
+  makeSlot(k) {
+    const mk = (base, mat, cap) => {
+      const g = new THREE.InstancedBufferGeometry();
+      g.index = base.index;
+      for (const key in base.attributes) g.setAttribute(key, base.attributes[key]);
+      g.setAttribute('aOffset', new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4).setUsage(THREE.DynamicDrawUsage));
+      g.setAttribute('aTint', new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3).setUsage(THREE.DynamicDrawUsage));
+      g.instanceCount = 0;
+      g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), this.tile * 0.75 + 3);
+      const m = new THREE.Mesh(g, mat);
+      m.receiveShadow = true;
+      m.visible = false;
+      this.group.add(m);
+      return m;
+    };
+    return { key: null, cx: 0, cz: 0, n: 0, fn: 0,
+      grass: mk(this.clumps[k % this.clumps.length], this.mat, this.perTile),
+      flowers: mk(this.flower, this.fmat, this.flowerCap) };
+  }
+
+  fill(slot, ix, iz) {
+    const { tile, perTile } = this;
+    const tx = ix * tile, tz = iz * tile;
+    const rnd = seeded((Math.floor(hash2(ix * 1.37 + 0.11, iz * 2.71 + 0.53) * 2147483647) ^ 0x5bd1e995) | 0);
+    const go = slot.grass.geometry.attributes.aOffset.array, gt = slot.grass.geometry.attributes.aTint.array;
+    const fo = slot.flowers.geometry.attributes.aOffset.array, ft = slot.flowers.geometry.attributes.aTint.array;
+    const green = _green, dry = _dry, dark = _dark, c = _c;
+    let n = 0, fn = 0;
+    for (let i = 0; i < perTile; i++) {
+      const x = tx + rnd() * tile, z = tz + rnd() * tile;
+      const r1 = rnd(), r2 = rnd(), r3 = rnd(), r4 = rnd(), r5 = rnd(), r6 = rnd(), r7 = rnd();
+      const pd = pathDist(x, z);
+      if (pd < 1.45 && pd > 0.35) continue;      // Fahrspuren frei
+      const pe = pondE(x, z);
+      if (pe < 1.06) continue;                    // kein Gras im Wasser
+      const dens = fbm(x / 25, z / 25, 2);
+      if (dens < -0.35 && r1 < 0.6) continue;
+      const y = heightAt(x, z);
+      let scale = (0.5 + r2 * 0.35) * (1 + 0.3 * smoothstep(-0.2, 0.6, dens));
+      if (pd <= 0.35) scale *= 0.55;
+      if (pe < 1.5) scale *= 1.1 + (1.5 - pe) * 0.6; // am Ufer üppiger
+      const dryness = smoothstep(0.0, 0.9, fbm(x / 60 + 3, z / 60, 2) * 0.5 + 0.5 + (r3 - 0.5) * 0.35);
+      c.copy(green).lerp(dry, dryness * 0.6 * (pe < 1.6 ? 0.3 : 1)).lerp(dark, r4 * 0.35);
+      go[n * 4] = x; go[n * 4 + 1] = y - 0.02; go[n * 4 + 2] = z; go[n * 4 + 3] = Math.floor(scale * 100) + r5 * 0.999;
+      gt[n * 3] = c.r * 1.12; gt[n * 3 + 1] = c.g * 1.12; gt[n * 3 + 2] = c.b * 1.12;
+      n++;
+      // Wiesenblumen in Nestern
+      if (fn < this.flowerCap && noise2(x / 9, z / 9) > 0.45 && r6 < 0.18) {
+        fo[fn * 4] = x + 0.2; fo[fn * 4 + 1] = y - 0.02; fo[fn * 4 + 2] = z + 0.1; fo[fn * 4 + 3] = Math.floor((0.8 + r7 * 0.5) * 100) + r5 * 0.999;
+        ft[fn * 3] = 1; ft[fn * 3 + 1] = 1; ft[fn * 3 + 2] = r7 < 0.15 ? 0.6 : 1;
+        fn++;
       }
+    }
+    slot.cx = tx + tile / 2; slot.cz = tz + tile / 2; slot.n = n; slot.fn = fn;
+    const y = heightAt(slot.cx, slot.cz);
+    for (const [m, cnt] of [[slot.grass, n], [slot.flowers, fn]]) {
+      const g = m.geometry;
+      g.attributes.aOffset.needsUpdate = true; g.attributes.aTint.needsUpdate = true;
+      g.attributes.aOffset.clearUpdateRanges?.(); g.attributes.aTint.clearUpdateRanges?.();
+      g.instanceCount = cnt;
+      g.boundingSphere.center.set(slot.cx, y, slot.cz);
+      m.visible = cnt > 0;
     }
   }
 
-  makeTile(base, mat, offs, tints, cx, cz, tile, isFlower = false) {
-    const g = new THREE.InstancedBufferGeometry();
-    g.index = base.index;
-    for (const k in base.attributes) g.setAttribute(k, base.attributes[k]);
-    g.setAttribute('aOffset', new THREE.InstancedBufferAttribute(new Float32Array(offs), 4));
-    g.setAttribute('aTint', new THREE.InstancedBufferAttribute(new Float32Array(tints), 3));
-    const n = offs.length / 4;
-    g.instanceCount = n;
-    const y = heightAt(cx, cz);
-    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(cx, y, cz), tile * 0.75 + 3);
-    g.boundingBox = new THREE.Box3(new THREE.Vector3(cx - tile, y - 10, cz - tile), new THREE.Vector3(cx + tile, y + 10, cz + tile));
-    const mesh = new THREE.Mesh(g, mat);
-    mesh.receiveShadow = true;
-    mesh.userData = { cx, cz, n, isFlower };
-    this.group.add(mesh);
-    return mesh;
-  }
-
-  update(camera) {
+  update(camera, budget = 3) {
+    const { tile, span, reach } = this;
+    const px = camera.position.x, pz = camera.position.z;
+    // nach einem Sprung (z. B. zurück in den Showroom) alles auf einmal nachziehen
+    if (this.last && Math.hypot(px - this.last.x, pz - this.last.z) > this.R) budget = Infinity;
+    this.last = { x: px, z: pz };
+    const ix0 = Math.floor(px / tile), iz0 = Math.floor(pz / tile);
+    const want = new Map();
+    for (let i = ix0 - span; i <= ix0 + span; i++) for (let j = iz0 - span; j <= iz0 + span; j++) {
+      const d = Math.hypot((i + 0.5) * tile - px, (j + 0.5) * tile - pz);
+      if (d <= reach) want.set(i + ',' + j, { i, j, d });
+    }
+    const free = this.slots.filter((s2) => !s2.key || !want.has(s2.key));
+    const missing = [...want.entries()].filter(([k]) => !this.cells.has(k)).sort((a2, b2) => a2[1].d - b2[1].d);
+    for (const [key, w] of missing) {
+      if (budget <= 0 || !free.length) break;
+      // eine nicht mehr benötigte Kachel wiederverwenden
+      const slot = free.pop();
+      if (slot.key) this.cells.delete(slot.key);
+      this.fill(slot, w.i, w.j);
+      slot.key = key;
+      this.cells.set(key, slot);
+      budget--;
+    }
     // LOD: entfernte Kacheln zeichnen weniger Halme (Instanzen sind zufällig verteilt)
-    for (const m of this.tiles) {
-      const d = Math.hypot(camera.position.x - m.userData.cx, camera.position.z - m.userData.cz);
+    for (const s2 of this.slots) {
+      if (!s2.key) continue;
+      const d = Math.hypot(px - s2.cx, pz - s2.cz);
       const f = d < 22 ? 1 : Math.max(0.12, 1 - (d - 22) / 70);
-      m.geometry.instanceCount = Math.floor(m.userData.n * f);
+      s2.grass.geometry.instanceCount = Math.floor(s2.n * f);
+      s2.flowers.geometry.instanceCount = Math.floor(s2.fn * f);
     }
   }
 }
+const _green = new THREE.Color('#79a23a'), _dry = new THREE.Color('#b4ab60'), _dark = new THREE.Color('#5d8a2e'), _c = new THREE.Color();

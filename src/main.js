@@ -1,3 +1,13 @@
+// Schriften lokal ausliefern (keine Verbindung zu Google Fonts, DSGVO)
+import '@fontsource/big-shoulders-display/500';
+import '@fontsource/big-shoulders-display/700';
+import '@fontsource/big-shoulders-display/900';
+import '@fontsource/dancing-script/700';
+import '@fontsource/ibm-plex-mono/400';
+import '@fontsource/ibm-plex-mono/500';
+import '@fontsource/ibm-plex-sans/400';
+import '@fontsource/ibm-plex-sans/500';
+import '@fontsource/ibm-plex-sans/600';
 import './style.css';
 import * as THREE from 'three';
 import gsap from 'gsap';
@@ -20,7 +30,8 @@ import { TireTracks } from './scene/tracks.js';
 import { createRestArea } from './scene/feierabend.js';
 import { createFireflies, createButterflies } from './scene/critters.js';
 import { GodRaysPass } from './scene/godrays.js';
-import { pathDist } from './scene/terrain.js';
+import { pathDist, inWater } from './scene/terrain.js';
+import { createPond } from './scene/pond.js';
 
 const $ = (s) => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -32,8 +43,8 @@ if (params.has('fast')) gsap.ticker.lagSmoothing(0); // nur für Tests bei sehr 
 // ---------- Qualitätsstufe ----------
 const isMobile = matchMedia('(pointer: coarse)').matches || Math.min(innerWidth, innerHeight) < 600;
 const Q = isMobile || params.get('q') === 'low'
-  ? { name: 'low', dpr: 1.5, shadowMap: 1024, terrainSeg: 220, grassRadius: 48, grassPerTile: 420, samples: 2, forest: 7000 }
-  : { name: 'high', dpr: 2, shadowMap: 2048, terrainSeg: 340, forest: 17000, grassRadius: 72, grassPerTile: 1250, samples: 4 };
+  ? { name: 'low', dpr: 1.5, shadowMap: 1024, terrainSeg: 280, grassRadius: 48, grassPerTile: 420, samples: 2, forest: 7000 }
+  : { name: 'high', dpr: 2, shadowMap: 2048, terrainSeg: 420, forest: 17000, grassRadius: 72, grassPerTile: 1250, samples: 4 };
 
 // ---------- Renderer / Szene ----------
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
@@ -91,7 +102,7 @@ const audio = new EngineAudio();
 const tick = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 const progress = (p) => ($('#progress-bar').style.width = `${Math.round(p * 100)}%`);
 
-let atm, grass, parts, ctrl, hotspots, orchardLod, tracks, rest, obstacles = [];
+let atm, grass, parts, ctrl, hotspots, orchardLod, tracks, rest, pond, obstacles = [];
 const wheelPts = [0, 1, 2, 3].map(() => new THREE.Vector3());
 const STAGE_HEADING = 1.2;
 const G0 = heightAt(0, 0); // Bodenhöhe der Bühne
@@ -131,6 +142,11 @@ async function build() {
   scene.add(tracks.mesh);
   grass = new Grass(Q);
   scene.add(grass.group);
+  pond = createPond(Q, audio);
+  scene.add(pond.group);
+  obstacles.push(...pond.obstacles);
+  pond.hide.push(grass.group, tracks.mesh);
+  pond.onResult = onSkipResult;
   progress(0.8); await tick();
 
   parts = createTractor();
@@ -140,9 +156,12 @@ async function build() {
     onBump: (s) => { audio.clunk(Math.min(s / 4, 1)); shake(0.12 + s * 0.03); toast('Autsch! Der Baum stand zuerst da.'); },
     onShift: () => { audio.clunk(0.15); },
     onBoundary: () => toast('Hier endet die Wiese, bitte umdrehen.'),
+    blocked: inWater,
+    onBlocked: (s) => { if (s > 0.8) { audio.plop(0.4); shake(0.08); } toast('Halt! Der AGT 835 ist kein Boot.'); },
   });
   ctrl.reset(0, 0, STAGE_HEADING);
   scene.add(ctrl.particles.points);
+  pond.hide.push(ctrl.particles.points);
   let lastLamps = 0;
   atm.onLamps = (l) => { const on = l > 0.5 ? 1 : 0; if (on !== lastLamps) { lastLamps = on; ctrl.setLamps(!!on); } };
 
@@ -408,6 +427,7 @@ function enterDrive() {
       $('#drive-hud').classList.remove('hidden');
       $('#drive-help').classList.remove('fade');
       setTimeout(() => $('#drive-help').classList.add('fade'), 9000);
+      setTimeout(() => { if (mode === 'drive' && !pondVisited) toast('Tipp: Am Feldweg zweigt ein Weg zum Weiher ab.'); }, 11000);
       audio.horn();
     },
   });
@@ -492,6 +512,132 @@ function updateDriveCamera(dt) {
   }
 }
 
+// ---------- Am Weiher: auf dem Steg sitzen und Steine flitschen ----------
+let charge = null; // Zeitpunkt, seit dem der Wurf aufgeladen wird
+let skipRecord = +(localStorage.getItem('agt-flitsch-record') || 0);
+let pondVisited = false;
+let pondNear = false;
+const pondCam = { fwd: new THREE.Vector3(), right: new THREE.Vector3() };
+
+function nearPond() {
+  if (!pond || !parts) return false;
+  const j = parts.root.position;
+  return Math.hypot(j.x - pond.parkWorld.x, j.z - pond.parkWorld.z) < 11 && ctrl.speedKmh < 8;
+}
+
+function enterPond() {
+  if (mode !== 'drive' || !nearPond()) return;
+  mode = 'transition';
+  pondVisited = true;
+  Object.assign(ctrl.input, { throttle: 0, brake: 0, steer: 0, handbrake: true });
+  $('#drive-hud').classList.add('hidden');
+  $('#pond-btn').classList.add('hidden');
+  stopEngine(); // Motor aus, ab hier hört man nur noch den Weiher
+  camera.up.set(0, 1, 0);
+  const from = camera.position.clone();
+  const lookFrom = chase.look.clone();
+  const fov0 = camera.fov;
+  const p = { t: 0 };
+  gsap.to(p, {
+    t: 1, duration: 3.6, ease: 'power2.inOut',
+    onUpdate: () => {
+      camera.position.lerpVectors(from, pond.seatWorld, p.t);
+      camera.position.y += Math.sin(p.t * Math.PI) * 3;
+      camera.lookAt(lookFrom.clone().lerp(pond.lookWorld, p.t));
+      camera.fov = THREE.MathUtils.lerp(fov0, 52, p.t); camera.updateProjectionMatrix();
+    },
+    onComplete: () => {
+      mode = 'pond';
+      restLook.x = restLook.tx; restLook.y = restLook.ty;
+      updateSkipLabel();
+      $('#pond-hud').classList.remove('hidden');
+      toast('Halte die Maustaste (oder Leertaste) und lass im richtigen Moment los.');
+    },
+  });
+}
+
+function exitPond() {
+  if (mode !== 'pond') return;
+  mode = 'transition';
+  charge = null; pond.showHand(camera, null);
+  $('#pond-hud').classList.add('hidden');
+  startEngine();
+  const from = camera.position.clone();
+  const lookFrom = camera.position.clone().add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(10));
+  const fov0 = camera.fov;
+  const p = { t: 0 };
+  gsap.to(p, {
+    t: 1, duration: 3, ease: 'power2.inOut',
+    onUpdate: () => {
+      const { pos, look } = chaseTarget();
+      camera.position.lerpVectors(from, pos, p.t);
+      camera.position.y += Math.sin(p.t * Math.PI) * 3;
+      camera.lookAt(lookFrom.clone().lerp(look, p.t));
+      camera.fov = THREE.MathUtils.lerp(fov0, CAM_FOV[camMode], p.t); camera.updateProjectionMatrix();
+    },
+    onComplete: () => {
+      const { pos, look } = chaseTarget();
+      chase.pos.copy(pos); chase.look.copy(look);
+      ctrl.input.handbrake = false;
+      mode = 'drive';
+      $('#drive-hud').classList.remove('hidden');
+    },
+  });
+}
+
+function updatePondCamera(dt, t) {
+  restLook.x += (restLook.tx - restLook.x) * (1 - Math.exp(-dt * 2.5));
+  restLook.y += (restLook.ty - restLook.y) * (1 - Math.exp(-dt * 2.5));
+  camera.position.copy(pond.seatWorld);
+  camera.position.y += Math.sin(t * 0.9) * 0.01;
+  const f = pondCam.fwd.copy(pond.lookWorld).sub(pond.seatWorld).normalize();
+  f.applyAxisAngle(new THREE.Vector3(0, 1, 0), -restLook.x * 1.25);
+  const r = pondCam.right.set(f.z, 0, -f.x).normalize();
+  f.applyAxisAngle(r, restLook.y * 0.42);
+  camera.lookAt(tmpV.copy(camera.position).add(f));
+  // Wurfkraft pendelt hin und her: im richtigen Moment loslassen
+  if (charge !== null) {
+    const k = chargePower();
+    $('#power-fill').style.width = `${Math.round(k * 100)}%`;
+  }
+  pond.showHand(camera, charge === null ? null : chargePower());
+}
+
+function chargePower() {
+  const e = (performance.now() - charge) / 1000;
+  const ph = (e / 1.1) % 2;
+  return ph < 1 ? ph : 2 - ph;
+}
+function startCharge() {
+  if (mode !== 'pond' || charge !== null) return;
+  charge = performance.now();
+  $('#power').classList.add('on');
+}
+function releaseCharge() {
+  if (charge === null) return;
+  const power = chargePower();
+  charge = null;
+  $('#power').classList.remove('on');
+  $('#power-fill').style.width = '0%';
+  pond.showHand(camera, null);
+  const dir = camera.getWorldDirection(new THREE.Vector3());
+  const origin = camera.position.clone()
+    .addScaledVector(pondCam.right, -0.25).add(new THREE.Vector3(0, -0.25, 0)).addScaledVector(dir, 0.3);
+  pond.throwStone(origin, dir, power);
+}
+function updateSkipLabel(last) {
+  $('#skip-last').textContent = last === undefined ? '–' : last;
+  $('#skip-record').textContent = skipRecord;
+}
+function onSkipResult(n) {
+  const isRecord = n > skipRecord;
+  if (isRecord) { skipRecord = n; localStorage.setItem('agt-flitsch-record', String(n)); }
+  updateSkipLabel(n);
+  if (n === 0) toast('Plumps. Flacher werfen, Blick zum Horizont!');
+  else if (isRecord) toast(`Neuer Rekord: ${n}× gesprungen!`);
+  else toast(n === 1 ? 'Einmal gehüpft.' : `${n}× gesprungen!`);
+}
+
 // ---------- Eingabe ----------
 const keys = new Set();
 addEventListener('keydown', (e) => {
@@ -501,13 +647,17 @@ addEventListener('keydown', (e) => {
     if (e.code === 'KeyH') audio.horn();
     if (e.code === 'KeyC') setCamMode((camMode + 1) % camModes.length);
     if (e.code === 'KeyL') ctrl.setLamps(!ctrl.lampsOn);
+    if (e.code === 'KeyE') enterPond();
     if (e.code === 'Escape') exitDrive();
+  } else if (mode === 'pond') {
+    if (e.code === 'Escape') exitPond();
+    if (e.code === 'Space') { e.preventDefault(); startCharge(); }
   } else if (mode === 'rest') {
     if (e.code === 'Escape') exitRest();
     if (e.code === 'Space') e.preventDefault();
   } else if (e.code === 'Escape') { closeCard(); $('#datasheet').classList.add('hidden'); }
 });
-addEventListener('keyup', (e) => keys.delete(e.code));
+addEventListener('keyup', (e) => { keys.delete(e.code); if (e.code === 'Space') releaseCharge(); });
 addEventListener('blur', () => keys.clear());
 
 const touch = { steer: 0, gas: false, brake: false };
@@ -559,6 +709,13 @@ function wireUI() {
   $('#back-btn').addEventListener('click', exitDrive);
   $('#rest-btn').addEventListener('click', enterRest);
   $('#rest-back').addEventListener('click', exitRest);
+  $('#pond-btn').addEventListener('click', enterPond);
+  $('#pond-back').addEventListener('click', exitPond);
+  renderer.domElement.addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse' && e.button === 0) startCharge(); });
+  addEventListener('pointerup', (e) => { if (e.pointerType === 'mouse') releaseCharge(); });
+  const tb = $('#throw-btn');
+  tb.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); startCharge(); });
+  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) tb.addEventListener(ev, releaseCharge);
   addEventListener('pointermove', (e) => { restLook.tx = (e.clientX / innerWidth - 0.5) * 2; restLook.ty = (e.clientY / innerHeight - 0.5) * 2; });
   $('#engine-btn').addEventListener('click', () => (ctrl.engineOn ? stopEngine() : startEngine()));
   $('#datasheet-btn').addEventListener('click', () => { closeCard(); $('#datasheet').classList.toggle('hidden'); });
@@ -653,8 +810,16 @@ function loop(ts) {
     if (camera.position.y < gy) camera.position.y = gy;
   } else if (mode === 'rest') {
     updateRestCamera(dt, t);
+  } else if (mode === 'pond') {
+    updatePondCamera(dt, t);
   } else if (mode === 'drive') {
     updateDriveCamera(dt);
+    const near = nearPond();
+    if (near !== pondNear) {
+      pondNear = near;
+      $('#pond-btn').classList.toggle('hidden', !near);
+      if (near && !pondVisited) audio.clunk(0.05);
+    }
     $('#speed').textContent = Math.round(ctrl.speedKmh);
     $('#gear').textContent = ctrl.v < -0.1 ? 'R' : ctrl.gear;
     $('#rpm').textContent = Math.round(ctrl.rpm / 10) * 10;
@@ -668,7 +833,9 @@ function loop(ts) {
   }
 
   if (atm && parts) {
-    atm.update(t, camera, parts.root.position);
+    atm.update(t, camera, mode === 'pond' ? tmpV.copy(pond.seatWorld).setY(pond.seatWorld.y - 1).add(new THREE.Vector3(5, 0, 0)) : parts.root.position);
+    pond.update(dt, t, camera, atm);
+    if (frame % 10 === 0) audio.setPond(THREE.MathUtils.clamp(1 - Math.hypot(camera.position.x - pond.seatWorld.x, camera.position.z - pond.seatWorld.z) / 70, 0, 1) * 0.9);
     bloom.strength = atm.state.bloom;
     // Abend-Wert langsam nachziehen: Dorflichter gehen nach und nach an, Glühwürmchen erwachen
     shared.uNight.value += (atm.state.lamps - shared.uNight.value) * (1 - Math.exp(-dt / 5));
@@ -711,4 +878,4 @@ function loop(ts) {
 })();
 
 // Für Debugging in der Konsole
-window.__agt = { scene, camera, audio, renderer, composer, shared, get ctrl() { return ctrl; }, get tracks() { return tracks; }, get parts() { return parts; }, wheelPts, get atm() { return atm; }, controls, enterDrive, exitDrive, focusHotspot };
+window.__agt = { scene, camera, audio, renderer, composer, shared, get pond() { return pond; }, enterPond, exitPond, get mode() { return mode; }, get ctrl() { return ctrl; }, get tracks() { return tracks; }, get parts() { return parts; }, wheelPts, get atm() { return atm; }, controls, enterDrive, exitDrive, focusHotspot };

@@ -4,13 +4,13 @@ import { meshHeightAt, pathDist } from './terrain.js';
 // Reifenspuren, performanceschonend:
 //  - alle Spuren liegen in EINEM Mesh mit Ringpuffer; pro neuem Stück werden nur
 //    6 Vertices hochgeladen, das Verblassen rechnet der Shader (keine CPU pro Frame)
-//  - eine kleine Spurkarte (256×256 für 240×240 m) drückt das Gras auf gefahrenen
+//  - eine kleine Spurkarte (512×512 für 640×640 m) drückt das Gras auf gefahrenen
 //    Bahnen dauerhaft nieder und verblasst langsam wieder
 
 const SEG = 0.32;      // Länge eines Spurstücks in m
 const WIDTH = 0.3;     // Reifenbreite
 const LIFE = 150;      // Sekunden bis eine Spur verschwunden ist
-const MAP_SIZE = 256, MAP_WORLD = 240;
+const MAP_SIZE = 512, MAP_WORLD = 640; // deckt das ganze Fahrgebiet ab
 
 function treadTexture() {
   const c = document.createElement('canvas');
@@ -165,7 +165,7 @@ export class TireTracks {
 
   stamp(x, z) {
     const cx = (x / MAP_WORLD + 0.5) * MAP_SIZE, cz = (z / MAP_WORLD + 0.5) * MAP_SIZE;
-    const R = 1.2;
+    const R = 0.9; // in Texeln (≈ 1,1 m)
     for (let j = Math.floor(cz - R); j <= Math.ceil(cz + R); j++) {
       for (let i = Math.floor(cx - R); i <= Math.ceil(cx + R); i++) {
         if (i < 0 || j < 0 || i >= MAP_SIZE || j >= MAP_SIZE) continue;

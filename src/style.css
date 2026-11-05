@@ -186,3 +186,24 @@ h2 { font-family: var(--display); font-weight: 900; font-size: clamp(2rem, 4vw, 
 .rest-title { position: absolute; left: 50%; bottom: max(2rem, env(safe-area-inset-bottom)); transform: translateX(-50%);
   font-family: var(--display); font-weight: 500; font-style: italic; font-size: clamp(1.4rem, 3vw, 2rem); letter-spacing: 0.12em;
   color: var(--cream); opacity: 0.75; text-shadow: 0 2px 24px rgba(0,0,0,0.5); }
+
+/* ---------- Weiher ---------- */
+.pond-btn { position: fixed; left: 50%; bottom: max(7.5rem, calc(env(safe-area-inset-bottom) + 7.5rem)); transform: translateX(-50%); z-index: 12; pointer-events: auto; animation: pond-pulse 2.4s ease-in-out infinite; }
+.pond-btn kbd { font-family: var(--mono); font-size: 0.75rem; padding: 0.1rem 0.4rem; margin-left: 0.4rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.4); }
+@keyframes pond-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(215, 38, 30, 0.45); } 50% { box-shadow: 0 0 0 12px rgba(215, 38, 30, 0); } }
+#pond-hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
+#pond-hud .back-btn, #pond-hud .throw-btn { pointer-events: auto; }
+.skip-score { position: absolute; right: max(1.2rem, env(safe-area-inset-right)); top: max(1.2rem, env(safe-area-inset-top)); display: flex; gap: 0.6rem; }
+.skip-score > div { background: var(--glass); border: 1px solid var(--line); border-radius: 14px; padding: 0.5rem 0.9rem; backdrop-filter: blur(12px); text-align: center; min-width: 84px; }
+.skip-score small { display: block; font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; opacity: 0.7; }
+.skip-score span { font-family: var(--display); font-weight: 700; font-size: 2rem; line-height: 1.1; }
+.power { position: absolute; left: 50%; bottom: max(5.2rem, calc(env(safe-area-inset-bottom) + 5.2rem)); transform: translateX(-50%); width: min(320px, 60vw); height: 10px; border-radius: 99px; background: rgba(16,18,12,0.5); border: 1px solid var(--line); overflow: hidden; opacity: 0; transition: opacity 0.2s; }
+.power.on { opacity: 1; }
+.power-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #e9d9a8, #d7261e); }
+.pond-help { position: absolute; left: 50%; bottom: max(2rem, env(safe-area-inset-bottom)); transform: translateX(-50%); width: max-content; max-width: 92vw; text-align: center; font-size: 0.85rem; opacity: 0.85; text-shadow: 0 1px 12px rgba(0,0,0,0.6); }
+.throw-btn { display: none; position: absolute; right: 1.4rem; bottom: max(1.6rem, env(safe-area-inset-bottom)); touch-action: none; user-select: none; -webkit-user-select: none; }
+@media (pointer: coarse) {
+  .throw-btn { display: block; }
+  .pond-help { display: none; }
+  .pond-btn kbd { display: none; }
+}

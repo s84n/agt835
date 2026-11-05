@@ -473,6 +473,107 @@ export class EngineAudio {
     else this.bellTimer = setTimeout(chime, 60000 + Math.random() * 60000);
   }
 
+  // ---------- Weiher ----------
+  // kurzer Luftzug beim Wurf
+  whoosh(power = 0.5) {
+    if (!this.ready) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const n = ctx.createBufferSource(); n.buffer = this.whiteBuf;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.2;
+    bp.frequency.setValueAtTime(700, t); bp.frequency.exponentialRampToValueAtTime(2400, t + 0.18);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.05 + power * 0.06, t + 0.06); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.24);
+    n.connect(bp).connect(g).connect(this.master);
+    n.start(t, Math.random()); n.stop(t + 0.3);
+  }
+
+  // helles „Plitsch“ beim Aufsetzen des Steins
+  waterSkip(gain = 1) {
+    if (!this.ready) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const n = ctx.createBufferSource(); n.buffer = this.whiteBuf;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 2600 + Math.random() * 900; bp.Q.value = 2.5;
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.16 * gain, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+    n.connect(bp).connect(g).connect(this.master);
+    n.start(t, Math.random()); n.stop(t + 0.12);
+    const o = ctx.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(900 + Math.random() * 300, t); o.frequency.exponentialRampToValueAtTime(1700, t + 0.05);
+    const og = ctx.createGain(); og.gain.setValueAtTime(0.06 * gain, t); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+    o.connect(og).connect(this.master); o.start(t); o.stop(t + 0.08);
+  }
+
+  // dumpfes „Plumps“ (Stein versinkt, Fisch springt)
+  plop(gain = 1, small = false) {
+    if (!this.ready || gain <= 0.01) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const f0 = small ? 520 : 340;
+    const o = ctx.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f0 * 2.4, t + 0.07);
+    const og = ctx.createGain(); og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.22 * gain, t + 0.01); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+    o.connect(og).connect(this.master); o.start(t); o.stop(t + 0.2);
+    const n = ctx.createBufferSource(); n.buffer = this.whiteBuf;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = small ? 2200 : 1400;
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.12 * gain, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+    n.connect(lp).connect(g).connect(this.master); n.start(t + 0.02, Math.random()); n.stop(t + 0.45);
+  }
+
+  quack(gain = 1) {
+    if (!this.ready) return;
+    const ctx = this.ctx;
+    for (let k = 0; k < 3; k++) {
+      const t = ctx.currentTime + k * 0.22 + Math.random() * 0.04;
+      const o = ctx.createOscillator(); o.type = 'sawtooth';
+      o.frequency.setValueAtTime(420, t); o.frequency.linearRampToValueAtTime(300, t + 0.14);
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1100; bp.Q.value = 3;
+      const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.09 * gain, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+      o.connect(bp).connect(g).connect(this.master); o.start(t); o.stop(t + 0.17);
+    }
+  }
+
+  // Nähe zum Weiher (0–1): leises Plätschern, abends quaken Frösche
+  setPond(level) {
+    if (!this.ready) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    if (!this.pondG) {
+      this.pondG = ctx.createGain(); this.pondG.gain.value = 0;
+      this.pondG.connect(this.master);
+      const n = ctx.createBufferSource(); n.buffer = this.noiseBuf; n.loop = true;
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 650; bp.Q.value = 0.8;
+      const lap = ctx.createGain(); lap.gain.value = 0.05;
+      // langsames An- und Abschwellen wie kleine Wellen am Steg
+      const lfo = ctx.createOscillator(); lfo.frequency.value = 0.35;
+      const lfoG = ctx.createGain(); lfoG.gain.value = 0.035;
+      lfo.connect(lfoG).connect(lap.gain); lfo.start();
+      n.connect(bp).connect(lap).connect(this.pondG); n.start();
+      const croak = () => {
+        if (!this.ctx) return;
+        const lvl = this.pondLevel || 0;
+        if (lvl > 0.05 && this.mood !== 'day') {
+          const t0 = ctx.currentTime, reps = 2 + Math.floor(Math.random() * 4), f = 170 + Math.random() * 90;
+          for (let k = 0; k < reps; k++) {
+            const tt = t0 + k * 0.13;
+            const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = f;
+            const am = ctx.createOscillator(); am.frequency.value = 38;
+            const amG = ctx.createGain(); amG.gain.value = 0.5;
+            const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, tt);
+            g.gain.exponentialRampToValueAtTime(0.03 * lvl * (this.mood === 'dusk' ? 1.4 : 0.7), tt + 0.02);
+            g.gain.exponentialRampToValueAtTime(0.0001, tt + 0.1);
+            const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900;
+            am.connect(amG).connect(g.gain);
+            o.connect(lp).connect(g).connect(this.master);
+            o.start(tt); o.stop(tt + 0.12); am.start(tt); am.stop(tt + 0.12);
+          }
+        }
+        setTimeout(croak, 1500 + Math.random() * 4500);
+      };
+      setTimeout(croak, 2000);
+    }
+    this.pondLevel = level;
+    this.pondG.gain.setTargetAtTime(level, t, 0.8);
+  }
+
   // pro Frame
   update(rpm, load, listenerGain = 1) {
     if (!this.ready) return;

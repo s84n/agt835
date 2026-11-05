@@ -334,30 +334,75 @@ export function createTractor() {
   mesh(box(0.08, 0.06, 0.18, 0.01), M.darkMetal, 0, 0.32, -1.2, rear);
   mesh(new THREE.SphereGeometry(0.04, 12, 10), M.steel, 0, 0.38, -1.27, rear);
 
-  // Dreipunkt-Hubwerk (drehbar)
+  // Dreipunkt-Hubwerk (drehbar). Alle Teile hängen sichtbar zusammen:
+  // Lagerbock → Unterlenker → Fangöse, Hubwelle → Hubarm → Hubstrebe → Unterlenker,
+  // Oberlenkerbock → Oberlenker (Spindel) → Öse.
   const hitch = new THREE.Group();
   hitch.position.set(0, 0.42, -1.08);
   rear.add(hitch);
+  // Lagerbolzen der Unterlenker quer durch den Getriebeblock
+  mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.46, 10).rotateZ(Math.PI / 2), M.steel, 0, 0.42, -1.08, rear);
   const lowerLinks = [];
+  const liftRods = [];
+  const LL = 0.62, SPLAY = 0.09;              // Länge, seitliches Aufspreizen nach hinten
+  const llAng = Math.atan2(SPLAY, LL);
   for (const s of [-1, 1]) {
     const arm = new THREE.Group();
-    arm.position.set(s * 0.17, 0, 0);
+    arm.position.set(s * 0.19, 0, 0);
     hitch.add(arm);
-    mesh(box(0.035, 0.07, 0.62, 0.01), M.darkMetal, s * 0.04, 0, -0.3, arm).rotation.y = s * 0.12;
-    mesh(new THREE.TorusGeometry(0.035, 0.012, 6, 14).rotateY(Math.PI / 2), M.steel, s * 0.08, 0, -0.6, arm);
+    // Lagerauge am Drehpunkt
+    mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.05, 14).rotateZ(Math.PI / 2), M.darkMetal, 0, 0, 0, arm);
+    // Lenker: läuft vom Lagerauge leicht nach außen bis in die Fangöse
+    const end = new THREE.Vector3(s * SPLAY, 0, -LL);
+    const len = end.length() - 0.03;
+    const bar = mesh(box(0.032, 0.07, len, 0.01), M.darkMetal, 0, 0, 0, arm);
+    bar.position.copy(end).multiplyScalar(len / 2 / end.length());
+    bar.rotation.y = -s * llAng;
+    // Fangöse (Kugelgelenk) mit Kugel im Auge, quer zur Fahrtrichtung
+    mesh(new THREE.TorusGeometry(0.036, 0.013, 8, 16).rotateY(Math.PI / 2), M.steel, end.x, end.y, end.z, arm);
+    mesh(new THREE.SphereGeometry(0.026, 10, 8), M.steel, end.x, end.y, end.z, arm);
+    // Anlenkpunkt der Hubstrebe (Lasche auf dem Lenker)
+    const lowPivot = new THREE.Object3D();
+    lowPivot.position.set(s * SPLAY * 0.55, 0.045, -LL * 0.55);
+    arm.add(lowPivot);
+    mesh(box(0.045, 0.03, 0.06, 0.008), M.darkMetal, lowPivot.position.x, 0.03, lowPivot.position.z, arm);
     lowerLinks.push(arm);
-    // Hubarme oben
+
+    // Hubarm oben, sitzt auf der Hubwelle
     const lift = new THREE.Group();
-    lift.position.set(s * 0.15, 0.78, -1.05);
+    lift.position.set(s * 0.17, 0.86, -1.0);
     rear.add(lift);
-    mesh(box(0.035, 0.05, 0.3, 0.01), M.darkMetal, 0, 0, -0.15, lift);
+    mesh(box(0.035, 0.055, 0.32, 0.01), M.darkMetal, 0, 0, -0.14, lift);
+    mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.05, 12).rotateZ(Math.PI / 2), M.darkMetal, 0, 0, 0, lift); // Nabe
+    const upPivot = new THREE.Object3D();
+    upPivot.position.set(0, -0.01, -0.28);
+    lift.add(upPivot);
     lowerLinks.push(lift);
+
+    // Hubstrebe: wird jedes Bild zwischen Hubarm und Unterlenker ausgerichtet
+    const rod = new THREE.Group();
+    rod.name = 'Hubstrebe';
+    rear.add(rod);
+    const rodMesh = mesh(new THREE.CylinderGeometry(0.014, 0.014, 1, 8).translate(0, 0.5, 0), M.steel, 0, 0, 0, rod);
+    rodMesh.name = 'Hubstrebe';
+    // Gewinde-Spannschloss in der Mitte
+    const lock = mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.12, 8).translate(0, 0.5, 0), M.darkMetal, 0, 0, 0, rod);
+    lock.name = 'Spannschloss';
+    liftRods.push({ rod, rodMesh, lock, up: upPivot, low: lowPivot, lift, arm });
   }
+  // Hubwelle quer über dem Getriebe, trägt beide Hubarme
+  mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.42, 12).rotateZ(Math.PI / 2), M.steel, 0, 0.86, -1.0, rear);
+  // Oberlenkerbock am Turm (schließt die Lücke zum Oberlenker)
+  for (const s of [-1, 1]) mesh(box(0.018, 0.12, 0.1, 0.005), M.darkMetal, s * 0.04, 0.74, -1.105, rear);
+  mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.11, 8).rotateZ(Math.PI / 2), M.steel, 0, 0.74, -1.13, rear);
   const topLink = new THREE.Group();
-  topLink.position.set(0, 0.78, -1.1);
+  topLink.position.set(0, 0.74, -1.13);
   rear.add(topLink);
-  mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.45, 10).rotateX(Math.PI / 2), M.darkMetal, 0, 0, -0.22, topLink);
-  mesh(new THREE.TorusGeometry(0.03, 0.01, 6, 12).rotateY(Math.PI / 2), M.steel, 0, 0, -0.46, topLink);
+  // Oberlenker: Auge am Bock, Spindel mit dickerem Mittelrohr, Öse am Ende
+  mesh(new THREE.TorusGeometry(0.022, 0.009, 6, 12).rotateY(Math.PI / 2), M.steel, 0, 0, 0, topLink);
+  mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.42, 10).rotateX(Math.PI / 2), M.darkMetal, 0, 0, -0.23, topLink);
+  mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.2, 10).rotateX(Math.PI / 2), M.darkMetal, 0, 0, -0.22, topLink);
+  mesh(new THREE.TorusGeometry(0.03, 0.01, 6, 12).rotateY(Math.PI / 2), M.steel, 0, 0, -0.47, topLink);
 
   // Auspuff-Position (für Rauchpartikel) – unten rechts hinter der Haube
   const exhaust = new THREE.Object3D();
@@ -380,7 +425,7 @@ export function createTractor() {
   for (const g of [front, rear, engineShake]) mergeStatic(g);
 
   return {
-    root, body, front, rear, engineShake, wheels, steeringWheel, levers, pto, hitch, lowerLinks, topLink,
+    root, body, front, rear, engineShake, wheels, steeringWheel, levers, pto, hitch, lowerLinks, topLink, liftRods,
     headlights, exhaust, anchors, materials: M,
   };
 }

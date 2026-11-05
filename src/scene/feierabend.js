@@ -6,7 +6,7 @@ import { seeded } from './noise.js';
 // Feierabend-Ecke unter dem Obstbaum: Holzbank, Apfelkiste, Bierkasten (ohne Marke), Fallobst.
 // Liefert außerdem die Sitzposition für die Kamera.
 
-function woodTexture(seed, base = [150, 108, 66]) {
+export function woodTexture(seed, base = [150, 108, 66]) {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 64;
   const g = c.getContext('2d');

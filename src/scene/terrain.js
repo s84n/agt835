@@ -5,6 +5,14 @@ import { groundTextures } from './textures.js';
 // Landschaft nach den Fotos: Streuobstwiese am Hang (um den Ursprung), das Tal mit Dorf
 // Richtung -Z und gegenüber der bewaldete Albtrauf mit Kegelberg und Felsnase.
 
+// Weiher am Osthang der Obstwiese (Ziel des abzweigenden Feldwegs)
+export const POND = { x: 135, z: 72, rx: 24, rz: 16, level: 2.55 };
+// normierter Abstand zum Ufer: < 1 Wasser, 1 Uferlinie (mit unregelmäßiger Kante)
+export function pondE(x, z) {
+  const dx = (x - POND.x) / POND.rx, dz = (z - POND.z) / POND.rz;
+  return Math.hypot(dx, dz) * (1 + 0.1 * noise2(x / 14 + 5.1, z / 14 - 2.3) + 0.04 * noise2(x / 5, z / 5));
+}
+
 const H0 = rawHeight(0, 0);
 
 function rawHeight(x, z) {
@@ -27,6 +35,13 @@ function rawHeight(x, z) {
   // Rücken hinter der Wiese und seitliche Rahmung
   h += 38 * smoothstep(90, 430, z) + 6 * fbm(x / 60, z / 60, 2) * smoothstep(80, 200, z);
   h += 26 * smoothstep(260, 650, Math.abs(x)) * (1 - 0.6 * smoothstep(-150, -300, z));
+  // Weiher: Umgebung sanft einebnen (Parkplatz am Steg), dann die Mulde ausheben
+  const e = pondE(x, z);
+  if (e < 2.8) {
+    const bank = POND.level + 0.28 + Math.max(0, e - 1.05) * 0.55;
+    h = lerp(h, bank, smoothstep(2.8, 1.3, e));
+    if (e < 1.15) h = lerp(h, POND.level - 1.7, smoothstep(1.12, 0.42, e));
+  }
   return h;
 }
 
@@ -46,9 +61,43 @@ export function normalAt(x, z, out = new THREE.Vector3()) {
 // Feldweg (zweispurig) quer durch die Wiese
 export const PATH_Z = [-115, 125];
 export function pathX(z) { return 15 + 9 * Math.sin(z / 34) + 3 * Math.sin(z / 13 + 1.3); }
+
+// Abzweig zum Weiher: Bézierkurve vom Hauptweg bis zum Platz am Steg, als Polylinie (~1 m)
+export const POND_PARK = { x: 101, z: 71 };
+export const BRANCH = (() => {
+  const z0 = 50, P = [[pathX(z0), z0], [48, 58], [74, 80], [POND_PARK.x, POND_PARK.z]];
+  const pts = [];
+  const N = 110;
+  for (let i = 0; i <= N; i++) {
+    const t = i / N, u = 1 - t;
+    const b = [u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t];
+    pts.push([b[0] * P[0][0] + b[1] * P[1][0] + b[2] * P[2][0] + b[3] * P[3][0], b[0] * P[0][1] + b[1] * P[1][1] + b[2] * P[2][1] + b[3] * P[3][1]]);
+  }
+  let x0 = 1e9, x1 = -1e9, zz0 = 1e9, zz1 = -1e9;
+  for (const [x, z] of pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); zz0 = Math.min(zz0, z); zz1 = Math.max(zz1, z); }
+  return { pts, box: [x0 - 8, x1 + 8, zz0 - 8, zz1 + 8] };
+})();
+function branchDist(x, z) {
+  const [x0, x1, z0, z1] = BRANCH.box;
+  if (x < x0 || x > x1 || z < z0 || z > z1) return 999;
+  const P = BRANCH.pts;
+  let best = 1e9;
+  for (let i = 0; i < P.length - 1; i++) {
+    const ax = P[i][0], az = P[i][1], bx = P[i + 1][0] - ax, bz = P[i + 1][1] - az;
+    const t = Math.max(0, Math.min(1, ((x - ax) * bx + (z - az) * bz) / (bx * bx + bz * bz)));
+    const dx = x - ax - bx * t, dz = z - az - bz * t;
+    const d = dx * dx + dz * dz;
+    if (d < best) best = d;
+  }
+  return Math.sqrt(best);
+}
 export function pathDist(x, z) {
-  if (z < PATH_Z[0] - 4 || z > PATH_Z[1] + 4) return 999;
-  return Math.abs(x - pathX(z));
+  const main = z < PATH_Z[0] - 4 || z > PATH_Z[1] + 4 ? 999 : Math.abs(x - pathX(z));
+  return Math.min(main, branchDist(x, z));
+}
+// Steht der Punkt im Wasser? (für die Fahrphysik)
+export function inWater(x, z) {
+  return pondE(x, z) < 1.25 && heightAt(x, z) < POND.level + 0.12;
 }
 
 // Masken für Vegetation
@@ -143,6 +192,13 @@ export function createTerrain(quality) {
     // Feldweg
     const pd = pathDist(x, z);
     if (pd < 3) c.lerp(dirt, (1 - smoothstep(1.2, 3, pd)) * 0.55);
+    // Ufer: dunkler, feuchter Boden, unter Wasser schlammig
+    const pe = pondE(x, z);
+    if (pe < 1.6) {
+      const wet = smoothstep(1.6, 1.02, pe);
+      c.lerp(tmp.set('#5d5236'), wet * 0.55);
+      c.lerp(tmp.set('#3e3a2a'), smoothstep(POND.level + 0.1, POND.level - 0.5, y) * 0.9);
+    }
     // Dorf: etwas verdichteter Boden
     c.lerp(tmp.set('#8f9468'), villageMask(x, z) * 0.35);
 
@@ -207,28 +263,44 @@ export function createPath() {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
 
-  const W = 3.0, step = 1.0;
-  const verts = [], uvs = [], idx = [];
-  let v = 0, n = 0;
-  for (let z = PATH_Z[0]; z <= PATH_Z[1]; z += step) {
-    const x = pathX(z);
-    const dx = (pathX(z + 0.5) - pathX(z - 0.5));
-    const len = Math.hypot(dx, 1);
-    const px = 1 / len, pz = -dx / len; // Normale zur Laufrichtung
-    for (const s of [-1, 1]) {
-      const vx = x + px * s * W / 2, vz = z + pz * s * W / 2;
-      verts.push(vx, heightAt(vx, vz) + 0.05, vz);
-      uvs.push(s < 0 ? 0 : 1, v);
-    }
-    if (n > 0) { const b = (n - 1) * 2; idx.push(b, b + 2, b + 1, b + 1, b + 2, b + 3); }
-    v += step / 4; n++;
-  }
+  const W = 3.0;
+  const verts = [], uvs = [], cols = [], idx = [];
+  let n = 0;
+  // Ribbon entlang einer Polylinie; fadeIn/fadeOut blenden die Enden weich aus
+  const ribbon = (pts, fadeIn = 0, fadeOut = 0) => {
+    let v = 0, len = 0;
+    const total = pts.reduce((s2, p, i) => s2 + (i ? Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) : 0), 0);
+    const start = n;
+    pts.forEach(([x, z], i) => {
+      const a2 = pts[Math.max(0, i - 1)], b2 = pts[Math.min(pts.length - 1, i + 1)];
+      const dx = b2[0] - a2[0], dz = b2[1] - a2[1], l = Math.hypot(dx, dz);
+      const px = dz / l, pz = -dx / l; // Normale zur Laufrichtung
+      if (i) { const d = Math.hypot(x - pts[i - 1][0], z - pts[i - 1][1]); len += d; v += d / 4; }
+      let alpha = 1;
+      if (fadeIn) alpha = Math.min(alpha, len / fadeIn);
+      if (fadeOut) alpha = Math.min(alpha, (total - len) / fadeOut + 0.25);
+      alpha = Math.max(0, Math.min(1, alpha));
+      for (const s2 of [-1, 1]) {
+        const vx = x + px * s2 * W / 2, vz = z + pz * s2 * W / 2;
+        verts.push(vx, heightAt(vx, vz) + 0.05, vz);
+        uvs.push(s2 < 0 ? 0 : 1, v);
+        cols.push(1, 1, 1, alpha);
+      }
+      if (n > start) { const b3 = (n - 1) * 2; idx.push(b3, b3 + 2, b3 + 1, b3 + 1, b3 + 2, b3 + 3); }
+      n++;
+    });
+  };
+  const main = [];
+  for (let z = PATH_Z[0]; z <= PATH_Z[1]; z += 1) main.push([pathX(z), z]);
+  ribbon(main);
+  ribbon(BRANCH.pts.slice(2), 6, 4);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 4));
   geo.setIndex(idx);
   geo.computeVertexNormals();
-  const mat = new THREE.MeshLambertMaterial({ map: tex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+  const mat = new THREE.MeshLambertMaterial({ map: tex, vertexColors: true, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;
   mesh.renderOrder = 1;

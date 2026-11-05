@@ -1,0 +1,18 @@
+Schriften dieser Seite
+======================
+
+Alle Schriften werden von dieser Website selbst ausgeliefert (kein Abruf bei
+Google Fonts oder anderen Drittanbietern; es werden dabei keine Daten an Dritte
+übertragen und keine Cookies gesetzt).
+
+Sie stehen unter der SIL Open Font License, Version 1.1 (OFL-1.1), die das
+Einbetten und Weitergeben ausdrücklich erlaubt. Der jeweils vollständige
+Lizenztext mit Copyright-Hinweis liegt in diesem Ordner:
+
+  Big Shoulders Display   big-shoulders-display-OFL-1.1.txt
+  Dancing Script          dancing-script-OFL-1.1.txt
+  IBM Plex Mono           ibm-plex-mono-OFL-1.1.txt
+  IBM Plex Sans           ibm-plex-sans-OFL-1.1.txt
+
+Die Schriftdateien sind unverändert (bezogen über die Fontsource-Pakete,
+https://fontsource.org). Sie werden nicht einzeln verkauft.
