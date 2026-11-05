@@ -35,9 +35,16 @@ export function applyGrime(material, o) {
     Object.assign(sh.uniforms, u, grimeShared);
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>
-        uniform mat4 uRootInv; varying vec3 vTPos; varying vec3 vLPos; varying float vUp;`)
+        uniform mat4 uRootInv; varying vec3 vTPos; varying vec3 vLPos; varying float vUp;
+        #ifdef GRIME_BAKED
+          attribute vec3 grimePos;
+        #endif`)
       .replace('#include <project_vertex>', `#include <project_vertex>
-        vTPos = (uRootInv * modelMatrix * vec4(transformed, 1.0)).xyz;
+        #ifdef GRIME_BAKED
+          vTPos = grimePos; // Ruhelage im Traktor-Raum: Flecken kleben am Blech, auch wenn es vibriert
+        #else
+          vTPos = (uRootInv * modelMatrix * vec4(transformed, 1.0)).xyz;
+        #endif
         vLPos = position;
         vUp = normalize(mat3(uRootInv * modelMatrix) * objectNormal).y;`);
     sh.fragmentShader = sh.fragmentShader
@@ -92,15 +99,40 @@ export function applyGrime(material, o) {
   material.needsUpdate = true;
 }
 
-// Wendet die in material.userData.grime hinterlegten Parameter auf alle Materialien an
+// Wendet die in material.userData.grime hinterlegten Parameter auf alle Materialien an.
+// Zusätzlich wird die Ruhelage jedes Vertex im Traktor-Raum als Attribut eingebacken:
+// Bewegte Teile (Motorvibration, Rütteln, Hebel) tragen ihre Rost- und Schmutzflecken
+// dadurch mit, statt durch ein feststehendes Muster zu gleiten.
 export function applyGrimeToObject(root) {
   const done = new Set();
+  root.updateMatrixWorld(true);
+  const rootInv = root.matrixWorld.clone().invert();
+  const mtx = new THREE.Matrix4();
+  const used = new Set();
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    const grimeMats = mats.filter((m) => m.userData.grime && !m.userData.grime.local);
+    if (grimeMats.length && !o.isInstancedMesh && o.geometry.attributes.position) {
+      // geteilte Geometrie klonen, damit jede Instanz ihre eigene Lage bekommt
+      if (used.has(o.geometry)) o.geometry = o.geometry.clone();
+      used.add(o.geometry);
+      const pos = o.geometry.attributes.position;
+      mtx.multiplyMatrices(rootInv, o.matrixWorld);
+      const arr = new Float32Array(pos.count * 3);
+      const v = new THREE.Vector3();
+      for (let i = 0; i < pos.count; i++) v.fromBufferAttribute(pos, i).applyMatrix4(mtx).toArray(arr, i * 3);
+      o.geometry.setAttribute('grimePos', new THREE.BufferAttribute(arr, 3));
+      for (const m of grimeMats) m.userData.grimeBaked = true;
+    }
+  });
   root.traverse((o) => {
     if (!o.isMesh) return;
     const mats = Array.isArray(o.material) ? o.material : [o.material];
     for (const m of mats) {
       if (done.has(m) || !m.userData.grime) continue;
       done.add(m);
+      if (m.userData.grimeBaked) m.defines = { ...(m.defines || {}), GRIME_BAKED: '' };
       applyGrime(m, m.userData.grime);
     }
   });
