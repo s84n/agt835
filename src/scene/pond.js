@@ -65,16 +65,20 @@ void main() {
   vec3 N = normalize(vec3(-g.x, 1.0, -g.y));
   vec3 V = normalize(cameraPosition - vWorld);
   float ndv = max(dot(N, V), 0.0);
-  float fres = 0.12 + 0.88 * pow(1.0 - ndv, 3.0);
+  float fres = 0.2 + 0.8 * pow(1.0 - ndv, 3.0);
   vec3 R = reflect(-V, N);
   vec3 sky = mix(uSkyH, uSkyT, pow(clamp(R.y, 0.0, 1.0), 0.6));
   vec3 refl = sky;
   if (uReflect > 0.5) {
+    // Verzerrung zum Ufer hin zurücknehmen, damit Schilf und Bäume sauber im Wasser stehen
+    vec2 q0 = (vWorld.xz - uCenter) / uRadii;
+    float calm = 1.0 - 0.7 * smoothstep(0.6, 1.0, length(q0));
     vec4 uv = vUvR;
-    uv.xy += N.xz * 0.6 * uv.w * 0.12;
+    uv.xy += N.xz * 0.6 * uv.w * 0.12 * calm;
     refl = texture2DProj(tDiffuse, uv).rgb;
   }
-  vec3 col = mix(uDeep, refl, fres);
+  // Teichwasser ist dunkel und spiegelt kräftig, auch steil von oben noch deutlich
+  vec3 col = mix(uDeep, refl, clamp(fres + 0.22, 0.0, 1.0));
   // Sonnenglitzern
   vec3 H = normalize(normalize(uSunDir) + V);
   float spec = pow(max(dot(N, H), 0.0), 420.0) * 7.0 + pow(max(dot(N, H), 0.0), 60.0) * 0.25;
@@ -82,7 +86,7 @@ void main() {
   // zum Ufer hin etwas trüber (Schwebstoffe im flachen Wasser)
   vec2 q = (vWorld.xz - uCenter) / uRadii;
   float shore = smoothstep(0.55, 1.0, length(q));
-  col = mix(col, col * vec3(0.82, 0.8, 0.62) + vec3(0.03, 0.03, 0.01), shore * 0.35);
+  col = mix(col, col * vec3(0.9, 0.9, 0.78), shore * 0.12);
   gl_FragColor = vec4(col, 1.0);
   #include <fog_fragment>
 }`;
@@ -113,8 +117,9 @@ function createWater(quality) {
   geo.setAttribute('normal', new THREE.Float32BufferAttribute(new Array(pos.length / 3).fill(0).flatMap(() => [0, 0, 1]), 3));
   geo.setIndex(idx);
   // Spiegelung in halber Auflösung genügt: das Wasser verzerrt sie ohnehin leicht
-  const size = quality.name === 'low' ? 512 : 1024;
-  const mesh = new Reflector(geo, { textureWidth: size, textureHeight: size / 2, clipBias: 0.003, multisample: 0, shader });
+  const w = Math.round(Math.min(quality.name === 'low' ? 768 : 1600, innerWidth * Math.min(devicePixelRatio, 2) * 0.75));
+  const h = Math.round(w * innerHeight / innerWidth);
+  const mesh = new Reflector(geo, { textureWidth: w, textureHeight: h, clipBias: 0.001, multisample: 0, shader });
   mesh.material.fog = true;
   mesh.rotation.x = -Math.PI / 2;
   mesh.position.set(POND.x, L, POND.z);
@@ -783,7 +788,8 @@ export function createPond(quality, audio) {
     if (d > 420) return;
     if (d > 130 && frame % 3 !== 0) return;
     const vis = hide.map((o) => o.visible);
-    hide.forEach((o) => (o.visible = false));
+    // aus der Nähe spiegelt sich auch das Ufergras, aus der Ferne sparen wir es uns
+    hide.forEach((o, i) => (o.visible = d < 90 && i === 0 ? o.visible : false));
     baseBefore.call(this, renderer, scene, camera);
     hide.forEach((o, i) => (o.visible = vis[i]));
   };

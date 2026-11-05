@@ -20,7 +20,8 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 
 import { Atmosphere } from './scene/atmosphere.js';
 import { createTerrain, createPath, heightAt } from './scene/terrain.js';
-import { createOrchard, createForest, createVillage, createWoodpile, Grass, shared } from './scene/vegetation.js';
+import { createOrchard, createForest, createWoodpile, Grass, shared } from './scene/vegetation.js';
+import { createVillage } from './scene/village.js';
 import { createTractor } from './tractor/model.js';
 import { TractorController } from './tractor/controller.js';
 import { grimeShared } from './tractor/grime.js';
@@ -32,6 +33,8 @@ import { createFireflies, createButterflies } from './scene/critters.js';
 import { GodRaysPass } from './scene/godrays.js';
 import { pathDist, inWater } from './scene/terrain.js';
 import { createPond } from './scene/pond.js';
+import { createViewpoint, LINDE } from './scene/viewpoint.js';
+import { VIEW } from './scene/terrain.js';
 
 const $ = (s) => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -102,7 +105,8 @@ const audio = new EngineAudio();
 const tick = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 const progress = (p) => ($('#progress-bar').style.width = `${Math.round(p * 100)}%`);
 
-let atm, grass, parts, ctrl, hotspots, orchardLod, tracks, rest, pond, obstacles = [];
+let atm, grass, parts, ctrl, hotspots, orchardLod, tracks, rest, pond, village, viewpoint, obstacles = [];
+let spots = []; // Plätze zum Absteigen: Steg am Weiher, Bank über dem Dorf
 const wheelPts = [0, 1, 2, 3].map(() => new THREE.Vector3());
 const STAGE_HEADING = 1.2;
 const G0 = heightAt(0, 0); // Bodenhöhe der Bühne
@@ -119,7 +123,7 @@ async function build() {
   scene.add(createTerrain(Q));
   scene.add(createPath());
   progress(0.35); await tick();
-  const orchard = createOrchard(Q);
+  const orchard = createOrchard(Q, { extras: [LINDE], clear: [{ x: VIEW.x, z: VIEW.z, r: 16 }] });
   scene.add(orchard.group);
   orchardLod = orchard.lod;
   obstacles.push(...orchard.obstacles);
@@ -135,7 +139,8 @@ async function build() {
   obstacles.push(wood.obstacle);
   progress(0.5); await tick();
   scene.add(createForest(Q));
-  scene.add(createVillage());
+  village = createVillage();
+  scene.add(village.group);
   progress(0.65); await tick();
   tracks = new TireTracks();
   shared.uTrail.value = tracks.map;
@@ -147,6 +152,13 @@ async function build() {
   obstacles.push(...pond.obstacles);
   pond.hide.push(grass.group, tracks.mesh);
   pond.onResult = onSkipResult;
+  viewpoint = createViewpoint();
+  scene.add(viewpoint.group);
+  obstacles.push(...viewpoint.obstacles);
+  spots = [
+    { id: 'pond', label: '🪨 Am Steg sitzen', hud: '#pond-hud', throw: true, ...pond, yaw: 1.25 },
+    { id: 'view', label: '🪑 Auf die Bank setzen', hud: '#view-hud', throw: false, ...viewpoint, yaw: 1.5 },
+  ];
   progress(0.8); await tick();
 
   parts = createTractor();
@@ -427,7 +439,7 @@ function enterDrive() {
       $('#drive-hud').classList.remove('hidden');
       $('#drive-help').classList.remove('fade');
       setTimeout(() => $('#drive-help').classList.add('fade'), 9000);
-      setTimeout(() => { if (mode === 'drive' && !pondVisited) toast('Tipp: Am Feldweg zweigt ein Weg zum Weiher ab.'); }, 11000);
+      setTimeout(() => { if (mode === 'drive' && !pondVisited) toast('Tipp: Vom Feldweg zweigen Wege zum Weiher und zur Aussichtsbank ab.'); }, 11000);
       audio.horn();
     },
   });
@@ -516,23 +528,27 @@ function updateDriveCamera(dt) {
 let charge = null; // Zeitpunkt, seit dem der Wurf aufgeladen wird
 let skipRecord = +(localStorage.getItem('agt-flitsch-record') || 0);
 let pondVisited = false;
-let pondNear = false;
-const pondCam = { fwd: new THREE.Vector3(), right: new THREE.Vector3() };
+let spot = null;     // aktueller Sitzplatz
+let nearSpot = null; // Platz, an dem der Traktor gerade steht
+let bellRung = false;
+const sitCam = { fwd: new THREE.Vector3(), right: new THREE.Vector3() };
 
-function nearPond() {
-  if (!pond || !parts) return false;
+function findNearSpot() {
+  if (!parts || ctrl.speedKmh >= 8) return null;
   const j = parts.root.position;
-  return Math.hypot(j.x - pond.parkWorld.x, j.z - pond.parkWorld.z) < 11 && ctrl.speedKmh < 8;
+  return spots.find((s) => Math.hypot(j.x - s.parkWorld.x, j.z - s.parkWorld.z) < 11) || null;
 }
 
-function enterPond() {
-  if (mode !== 'drive' || !nearPond()) return;
+function enterSpot() {
+  const s = mode === 'drive' && findNearSpot();
+  if (!s) return;
+  spot = s;
   mode = 'transition';
-  pondVisited = true;
+  if (s.id === 'pond') pondVisited = true;
   Object.assign(ctrl.input, { throttle: 0, brake: 0, steer: 0, handbrake: true });
   $('#drive-hud').classList.add('hidden');
-  $('#pond-btn').classList.add('hidden');
-  stopEngine(); // Motor aus, ab hier hört man nur noch den Weiher
+  $('#spot-btn').classList.add('hidden');
+  stopEngine(); // Motor aus, ab hier hört man nur noch die Natur
   camera.up.set(0, 1, 0);
   const from = camera.position.clone();
   const lookFrom = chase.look.clone();
@@ -541,26 +557,30 @@ function enterPond() {
   gsap.to(p, {
     t: 1, duration: 3.6, ease: 'power2.inOut',
     onUpdate: () => {
-      camera.position.lerpVectors(from, pond.seatWorld, p.t);
+      camera.position.lerpVectors(from, s.seatWorld, p.t);
       camera.position.y += Math.sin(p.t * Math.PI) * 3;
-      camera.lookAt(lookFrom.clone().lerp(pond.lookWorld, p.t));
+      camera.lookAt(lookFrom.clone().lerp(s.lookWorld, p.t));
       camera.fov = THREE.MathUtils.lerp(fov0, 52, p.t); camera.updateProjectionMatrix();
     },
     onComplete: () => {
-      mode = 'pond';
+      mode = 'sit';
       restLook.x = restLook.tx; restLook.y = restLook.ty;
-      updateSkipLabel();
-      $('#pond-hud').classList.remove('hidden');
-      toast('Halte die Maustaste (oder Leertaste) und lass im richtigen Moment los.');
+      $(s.hud).classList.remove('hidden');
+      if (s.throw) { updateSkipLabel(); toast('Halte die Maustaste (oder Leertaste) und lass im richtigen Moment los.'); }
+      else {
+        toast('Schau dich mit der Maus um.');
+        // einmal läutet die Kirchturmuhr herüber
+        if (!bellRung) { bellRung = true; setTimeout(() => mode === 'sit' && audio.bell(3), 2500); }
+      }
     },
   });
 }
 
-function exitPond() {
-  if (mode !== 'pond') return;
+function exitSpot() {
+  if (mode !== 'sit') return;
   mode = 'transition';
   charge = null; pond.showHand(camera, null);
-  $('#pond-hud').classList.add('hidden');
+  $(spot.hud).classList.add('hidden');
   startEngine();
   const from = camera.position.clone();
   const lookFrom = camera.position.clone().add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(10));
@@ -580,21 +600,23 @@ function exitPond() {
       chase.pos.copy(pos); chase.look.copy(look);
       ctrl.input.handbrake = false;
       mode = 'drive';
+      spot = null;
       $('#drive-hud').classList.remove('hidden');
     },
   });
 }
 
-function updatePondCamera(dt, t) {
+function updateSitCamera(dt, t) {
   restLook.x += (restLook.tx - restLook.x) * (1 - Math.exp(-dt * 2.5));
   restLook.y += (restLook.ty - restLook.y) * (1 - Math.exp(-dt * 2.5));
-  camera.position.copy(pond.seatWorld);
+  camera.position.copy(spot.seatWorld);
   camera.position.y += Math.sin(t * 0.9) * 0.01;
-  const f = pondCam.fwd.copy(pond.lookWorld).sub(pond.seatWorld).normalize();
-  f.applyAxisAngle(new THREE.Vector3(0, 1, 0), -restLook.x * 1.25);
-  const r = pondCam.right.set(f.z, 0, -f.x).normalize();
+  const f = sitCam.fwd.copy(spot.lookWorld).sub(spot.seatWorld).normalize();
+  f.applyAxisAngle(new THREE.Vector3(0, 1, 0), -restLook.x * spot.yaw);
+  const r = sitCam.right.set(f.z, 0, -f.x).normalize();
   f.applyAxisAngle(r, restLook.y * 0.42);
   camera.lookAt(tmpV.copy(camera.position).add(f));
+  if (!spot.throw) return;
   // Wurfkraft pendelt hin und her: im richtigen Moment loslassen
   if (charge !== null) {
     const k = chargePower();
@@ -609,7 +631,7 @@ function chargePower() {
   return ph < 1 ? ph : 2 - ph;
 }
 function startCharge() {
-  if (mode !== 'pond' || charge !== null) return;
+  if (mode !== 'sit' || !spot?.throw || charge !== null) return;
   charge = performance.now();
   $('#power').classList.add('on');
 }
@@ -622,7 +644,7 @@ function releaseCharge() {
   pond.showHand(camera, null);
   const dir = camera.getWorldDirection(new THREE.Vector3());
   const origin = camera.position.clone()
-    .addScaledVector(pondCam.right, -0.25).add(new THREE.Vector3(0, -0.25, 0)).addScaledVector(dir, 0.3);
+    .addScaledVector(sitCam.right, -0.25).add(new THREE.Vector3(0, -0.25, 0)).addScaledVector(dir, 0.3);
   pond.throwStone(origin, dir, power);
 }
 function updateSkipLabel(last) {
@@ -647,10 +669,10 @@ addEventListener('keydown', (e) => {
     if (e.code === 'KeyH') audio.horn();
     if (e.code === 'KeyC') setCamMode((camMode + 1) % camModes.length);
     if (e.code === 'KeyL') ctrl.setLamps(!ctrl.lampsOn);
-    if (e.code === 'KeyE') enterPond();
+    if (e.code === 'KeyE') enterSpot();
     if (e.code === 'Escape') exitDrive();
-  } else if (mode === 'pond') {
-    if (e.code === 'Escape') exitPond();
+  } else if (mode === 'sit') {
+    if (e.code === 'Escape') exitSpot();
     if (e.code === 'Space') { e.preventDefault(); startCharge(); }
   } else if (mode === 'rest') {
     if (e.code === 'Escape') exitRest();
@@ -709,8 +731,9 @@ function wireUI() {
   $('#back-btn').addEventListener('click', exitDrive);
   $('#rest-btn').addEventListener('click', enterRest);
   $('#rest-back').addEventListener('click', exitRest);
-  $('#pond-btn').addEventListener('click', enterPond);
-  $('#pond-back').addEventListener('click', exitPond);
+  $('#spot-btn').addEventListener('click', enterSpot);
+  $('#pond-back').addEventListener('click', exitSpot);
+  $('#view-back').addEventListener('click', exitSpot);
   renderer.domElement.addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse' && e.button === 0) startCharge(); });
   addEventListener('pointerup', (e) => { if (e.pointerType === 'mouse') releaseCharge(); });
   const tb = $('#throw-btn');
@@ -810,15 +833,15 @@ function loop(ts) {
     if (camera.position.y < gy) camera.position.y = gy;
   } else if (mode === 'rest') {
     updateRestCamera(dt, t);
-  } else if (mode === 'pond') {
-    updatePondCamera(dt, t);
+  } else if (mode === 'sit') {
+    updateSitCamera(dt, t);
   } else if (mode === 'drive') {
     updateDriveCamera(dt);
-    const near = nearPond();
-    if (near !== pondNear) {
-      pondNear = near;
-      $('#pond-btn').classList.toggle('hidden', !near);
-      if (near && !pondVisited) audio.clunk(0.05);
+    const near = findNearSpot();
+    if (near !== nearSpot) {
+      nearSpot = near;
+      $('#spot-btn').classList.toggle('hidden', !near);
+      if (near) $('#spot-label').textContent = near.label;
     }
     $('#speed').textContent = Math.round(ctrl.speedKmh);
     $('#gear').textContent = ctrl.v < -0.1 ? 'R' : ctrl.gear;
@@ -833,12 +856,13 @@ function loop(ts) {
   }
 
   if (atm && parts) {
-    atm.update(t, camera, mode === 'pond' ? tmpV.copy(pond.seatWorld).setY(pond.seatWorld.y - 1).add(new THREE.Vector3(5, 0, 0)) : parts.root.position);
+    atm.update(t, camera, mode === 'sit' ? tmpV.copy(spot.seatWorld).setY(spot.seatWorld.y - 1).addScaledVector(sitCam.fwd, 5) : parts.root.position);
     pond.update(dt, t, camera, atm);
     if (frame % 10 === 0) audio.setPond(THREE.MathUtils.clamp(1 - Math.hypot(camera.position.x - pond.seatWorld.x, camera.position.z - pond.seatWorld.z) / 70, 0, 1) * 0.9);
     bloom.strength = atm.state.bloom;
     // Abend-Wert langsam nachziehen: Dorflichter gehen nach und nach an, Glühwürmchen erwachen
     shared.uNight.value += (atm.state.lamps - shared.uNight.value) * (1 - Math.exp(-dt / 5));
+    village.update(shared.uNight.value);
     // Lichtstrahlen: je tiefer die Sonne, desto stärker
     const el = atm.state.sunEl;
     godrays.updateSun(camera, atm.sunVec, 0.15 + 0.6 * (1 - THREE.MathUtils.smoothstep(el, 6, 45)), atm.state.sunColor);
@@ -878,4 +902,4 @@ function loop(ts) {
 })();
 
 // Für Debugging in der Konsole
-window.__agt = { scene, camera, audio, renderer, composer, shared, get pond() { return pond; }, enterPond, exitPond, get mode() { return mode; }, get ctrl() { return ctrl; }, get tracks() { return tracks; }, get parts() { return parts; }, wheelPts, get atm() { return atm; }, controls, enterDrive, exitDrive, focusHotspot };
+window.__agt = { scene, camera, audio, renderer, composer, shared, get pond() { return pond; }, get spots() { return spots; }, enterSpot, exitSpot, get mode() { return mode; }, get ctrl() { return ctrl; }, get tracks() { return tracks; }, get parts() { return parts; }, wheelPts, get atm() { return atm; }, controls, enterDrive, exitDrive, focusHotspot };

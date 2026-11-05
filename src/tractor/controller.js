@@ -6,15 +6,17 @@ import { clamp, lerp } from '../scene/noise.js';
 // Fahrphysik für einen knickgelenkten Allradtraktor + Animation aller beweglichen Teile.
 
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _y = new THREE.Vector3(0, 1, 0);
-const GEAR_TOP = [3, 5, 7.5, 10.5, 14, 18.5, 24, 30].map((k) => k / 3.6); // m/s bei Nenndrehzahl
+const GEAR_TOP = [3, 5, 7.5, 10.5, 14.5, 19.5, 25.5, 32].map((k) => k / 3.6); // m/s bei Nenndrehzahl
 const REV_TOP = 12 / 3.6;
 const RPM_IDLE = 900, RPM_MAX = 3000;
 const MAX_PHI = 0.68; // ~39° Knickwinkel
-// Zugkraft je Gang (m/s² bei Vollgas): ein Traktor zieht kräftig, aber gemächlich hoch.
-// 0 → 30 km/h dauert so rund 25 Sekunden.
-const GEAR_ACC = [1.1, 0.95, 0.82, 0.7, 0.6, 0.52, 0.46, 0.42];
+// Beschleunigung je Gang auf ebener Strecke (m/s² bei Vollgas): gemächlich, 0 → 30 km/h in ~21 s.
+const GEAR_ACC = [1.3, 1.15, 1.0, 0.86, 0.74, 0.64, 0.57, 0.52];
+// Zugkraftreserve je Gang: so viel Hangabtrieb kann der Motor zusätzlich ausgleichen.
+// Im ersten Gang zieht er praktisch jeden Hang hoch, oben herum wird er langsamer.
+const GEAR_CAP = [7, 5.5, 4.2, 3.2, 2.5, 1.9, 1.5, 1.2];
 // befahrbares Gebiet: Ellipse über Wiese und Hang
-export const DRIVE_AREA = { cx: 0, cz: 45, rx: 270, rz: 185 };
+export const DRIVE_AREA = { cx: 0, cz: 35, rx: 270, rz: 195 };
 
 export class TractorController {
   constructor(parts, { obstacles = [], onBump, onShift, onBoundary, blocked, onBlocked } = {}) {
@@ -80,38 +82,64 @@ export class TractorController {
       const maxPhi = MAX_PHI * (1 - 0.55 * spd);
       const target = -inp.steer * maxPhi;
       const centering = Math.abs(target) < Math.abs(this.phi) - 1e-3;
-      const steerRate = (centering ? 1.0 : 0.6) * (1 - 0.35 * spd);
-      this.phi += clamp(target - this.phi, -steerRate * dt, steerRate * dt);
+      if (centering) {
+        // Loslassen: der Knick läuft nur langsam und mit dem Rollen zurück, weich auslaufend
+        const k = 0.3 + 0.06 * Math.abs(this.v);
+        const step = (target - this.phi) * (1 - Math.exp(-k * dt));
+        this.phi += clamp(step, -0.3 * dt, 0.3 * dt);
+      } else {
+        const steerRate = 0.6 * (1 - 0.35 * spd);
+        this.phi += clamp(target - this.phi, -steerRate * dt, steerRate * dt);
+      }
 
       // Antrieb: Gas nimmt langsam zu, schnell ab
       this.thr += clamp(inp.throttle - this.thr, -dt * 3, dt * 0.8);
       let acc = 0;
       const gTop = GEAR_TOP[this.gear - 1];
+      // Hangabtrieb (negativ = bergauf in Fahrtrichtung vorwärts)
+      const slope = -9.81 * Math.sin(-this.pitch) * 0.6;
+      const climb = Math.max(-slope, 0);
+      this.climb = climb;
       if (inp.throttle > 0 && this.v < -0.3) acc = 4.5; // erst bremsen
-      else if (this.thr > 0.01 && this.v >= -0.3 && this.shiftTimer <= 0) {
+      else if (this.thr > 0.01 && this.v >= -0.3) {
         const r = Math.max(this.v, 0) / gTop;
-        // kurz vor Gangende flacht die Zugkraft ab
-        acc = this.thr * GEAR_ACC[this.gear - 1] * (r < 1 ? 1 - 0.5 * r ** 6 : 0.05);
+        // kurz vor Gangende flacht die Zugkraft ab; beim Schalten trägt nur die Hangreserve
+        if (this.shiftTimer <= 0) acc = this.thr * GEAR_ACC[this.gear - 1] * (r < 1 ? 1 - 0.5 * r ** 6 : 0.05);
+        acc += this.thr * Math.min(climb, GEAR_CAP[this.gear - 1]) * (this.shiftTimer > 0 ? 0.9 : 1);
       }
       if (inp.brake > 0) {
         if (this.v > 0.3) acc = -4.5 * inp.brake;
-        else acc = -inp.brake * 0.8 * (this.v > -REV_TOP ? 1 : 0);
+        // rückwärts den Hang hoch: Reserve wie im ersten Rückwärtsgang
+        else acc = (-0.8 - Math.min(Math.max(slope, 0), 5)) * inp.brake * (this.v > -REV_TOP ? 1 : 0);
       }
       if (inp.handbrake) acc = -Math.sign(this.v) * Math.min(6.5, Math.abs(this.v) / dt);
-      // Hangabtrieb, Roll- und Luftwiderstand
-      acc += -9.81 * Math.sin(-this.pitch) * 0.6;
+      // Roll- und Luftwiderstand, Hangabtrieb
+      acc += slope;
       if (inp.handbrake === false) acc -= Math.sign(this.v) * Math.min(Math.abs(this.v) / dt, 0.006 * Math.abs(this.v) + 0.0012 * this.v * this.v);
-      // ohne Gas rollt er schwer aus (Motorbremse)
-      if (inp.throttle === 0 && inp.brake === 0) acc -= Math.sign(this.v) * Math.min(Math.abs(this.v) / dt, 0.45 + Math.abs(this.v) * 0.05);
+      if (inp.throttle === 0 && inp.brake === 0 && !inp.handbrake) {
+        // im Stand hält das Getriebe den Traktor am Hang fest
+        if (Math.abs(this.v) < 0.6) acc -= clamp(slope + this.v / Math.max(dt, 1e-3), -4, 4);
+        // sonst rollt er schwer aus (Motorbremse)
+        else acc -= Math.sign(this.v) * Math.min(Math.abs(this.v) / dt, 0.45 + Math.abs(this.v) * 0.05);
+      }
+      const vPrev = this.v;
       this.v += acc * dt;
+      // Gas gegeben: die Kupplung greift, er rollt am Hang nicht erst rückwärts
+      if (inp.throttle > 0 && vPrev >= -0.05 && this.v < 0) this.v = 0;
       if (this.shiftTimer > 0) this.shiftTimer -= dt;
       this.v = clamp(this.v, -REV_TOP, GEAR_TOP[7] * 1.02);
 
       // Automatische Gangwahl
       const vf = Math.max(this.v, 0);
+      this.shiftCool = (this.shiftCool || 0) - dt;
       if (this.v >= -0.1) {
-        if (vf > GEAR_TOP[this.gear - 1] * 0.92 && this.gear < 8 && inp.throttle > 0) { this.gear++; this.shiftTimer = 0.45; this.onShift(this.gear); }
-        else if (this.gear > 1 && vf < GEAR_TOP[this.gear - 2] * 0.55) { this.gear--; this.onShift(this.gear); }
+        // nicht hochschalten, wenn der nächste Gang den Hang nicht mehr schafft
+        if (vf > GEAR_TOP[this.gear - 1] * 0.92 && this.gear < 8 && inp.throttle > 0 && climb < GEAR_CAP[this.gear] * 0.8) {
+          this.gear++; this.shiftTimer = 0.45; this.shiftCool = 1; this.onShift(this.gear);
+        } else if (this.gear > 1 && (vf < GEAR_TOP[this.gear - 2] * 0.55
+          || (this.shiftCool < 0 && climb > GEAR_CAP[this.gear - 1] * 0.95 && vf < GEAR_TOP[this.gear - 1] * 0.8))) {
+          this.gear--; this.shiftCool = 1; this.onShift(this.gear);
+        }
       }
       const ratio = this.v < -0.1 ? Math.abs(this.v) / REV_TOP : vf / GEAR_TOP[this.gear - 1];
       this.rpmTarget = clamp(RPM_IDLE + ratio * (RPM_MAX - RPM_IDLE) * 1.05, RPM_IDLE, RPM_MAX) + this.thr * 250 * (Math.abs(this.v) < 0.3 ? 1.5 : 0.4);

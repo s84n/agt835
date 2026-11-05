@@ -23,6 +23,10 @@ export class EngineAudio {
       console.warn('Audio konnte nicht geladen werden', e);
       this.raw = null;
     }
+    // Naturaufnahmen vom Weiher (gemeinfrei, Quellen in public/licenses/AUDIO.txt)
+    for (const n of ['ducks', 'frogs']) {
+      try { (this.raw ||= {})[n] = await load(n); } catch (e) { console.warn('Weiher-Ton fehlt', n); }
+    }
   }
 
   async init() {
@@ -45,6 +49,10 @@ export class EngineAudio {
         this.buffers.idle = await ctx.decodeAudioData(this.raw.idle.slice(0));
         this.buffers.drive = await ctx.decodeAudioData(this.raw.drive.slice(0));
       } catch (e) { console.warn('Dekodieren fehlgeschlagen', e); }
+      for (const n of ['ducks', 'frogs']) {
+        if (!this.raw[n]) continue;
+        try { this.buffers[n] = await ctx.decodeAudioData(this.raw[n].slice(0)); } catch (e) { console.warn('Dekodieren fehlgeschlagen', n); }
+      }
     }
     const loop = (buf) => {
       const src = ctx.createBufferSource();
@@ -518,18 +526,18 @@ export class EngineAudio {
     n.connect(lp).connect(g).connect(this.master); n.start(t + 0.02, Math.random()); n.stop(t + 0.45);
   }
 
+  // echte Stockenten (Aufnahme): kurze Quak-Serie aus einer der beiden Rufgruppen
   quack(gain = 1) {
-    if (!this.ready) return;
-    const ctx = this.ctx;
-    for (let k = 0; k < 3; k++) {
-      const t = ctx.currentTime + k * 0.22 + Math.random() * 0.04;
-      const o = ctx.createOscillator(); o.type = 'sawtooth';
-      o.frequency.setValueAtTime(420, t); o.frequency.linearRampToValueAtTime(300, t + 0.14);
-      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1100; bp.Q.value = 3;
-      const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.09 * gain, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
-      o.connect(bp).connect(g).connect(this.master); o.start(t); o.stop(t + 0.17);
-    }
+    if (!this.ready || !this.buffers.ducks) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const src = ctx.createBufferSource(); src.buffer = this.buffers.ducks;
+    src.playbackRate.value = 0.94 + Math.random() * 0.12;
+    const [from, len] = Math.random() < 0.6 ? [0.2 + Math.random() * 0.5, 1.2] : [3.05, 1.15];
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.9 * gain, t + 0.04);
+    g.gain.setValueAtTime(0.9 * gain, t + len - 0.2); g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+    src.connect(g).connect(this.master);
+    src.start(t, from, len + 0.05);
   }
 
   // Nähe zum Weiher (0–1): leises Plätschern, abends quaken Frösche
@@ -547,31 +555,25 @@ export class EngineAudio {
       const lfoG = ctx.createGain(); lfoG.gain.value = 0.035;
       lfo.connect(lfoG).connect(lap.gain); lfo.start();
       n.connect(bp).connect(lap).connect(this.pondG); n.start();
-      const croak = () => {
+      // Teichfrosch-Chor als Schleife; lauter, je später der Tag
+      if (this.buffers.frogs) {
+        const f = ctx.createBufferSource(); f.buffer = this.buffers.frogs; f.loop = true;
+        f.loopStart = 0.7; f.loopEnd = this.buffers.frogs.duration - 0.8;
+        this.frogG = ctx.createGain(); this.frogG.gain.value = 0;
+        f.connect(this.frogG).connect(this.pondG);
+        f.start(0, 1 + Math.random() * 10);
+      }
+      // ab und zu meldet sich eine Ente
+      const duck = () => {
         if (!this.ctx) return;
-        const lvl = this.pondLevel || 0;
-        if (lvl > 0.05 && this.mood !== 'day') {
-          const t0 = ctx.currentTime, reps = 2 + Math.floor(Math.random() * 4), f = 170 + Math.random() * 90;
-          for (let k = 0; k < reps; k++) {
-            const tt = t0 + k * 0.13;
-            const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = f;
-            const am = ctx.createOscillator(); am.frequency.value = 38;
-            const amG = ctx.createGain(); amG.gain.value = 0.5;
-            const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, tt);
-            g.gain.exponentialRampToValueAtTime(0.03 * lvl * (this.mood === 'dusk' ? 1.4 : 0.7), tt + 0.02);
-            g.gain.exponentialRampToValueAtTime(0.0001, tt + 0.1);
-            const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900;
-            am.connect(amG).connect(g.gain);
-            o.connect(lp).connect(g).connect(this.master);
-            o.start(tt); o.stop(tt + 0.12); am.start(tt); am.stop(tt + 0.12);
-          }
-        }
-        setTimeout(croak, 1500 + Math.random() * 4500);
+        if ((this.pondLevel || 0) > 0.2) this.quack(0.35 * this.pondLevel);
+        setTimeout(duck, 18000 + Math.random() * 30000);
       };
-      setTimeout(croak, 2000);
+      setTimeout(duck, 6000);
     }
     this.pondLevel = level;
     this.pondG.gain.setTargetAtTime(level, t, 0.8);
+    if (this.frogG) this.frogG.gain.setTargetAtTime(({ day: 0.12, golden: 0.45, dusk: 1 }[this.mood] ?? 0.45) * 1.4, t, 1.5);
   }
 
   // pro Frame

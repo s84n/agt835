@@ -39,7 +39,7 @@ const box = (w, h, d, x, y, z, ry = 0) => {
   return g;
 };
 
-function bench(mat, metal) {
+export function bench(mat, metal) {
   const wood = [], iron = [];
   // Sitz: 3 Latten
   for (let i = 0; i < 3; i++) wood.push(box(1.7, 0.035, 0.11, 0, 0.45, -0.13 + i * 0.13));

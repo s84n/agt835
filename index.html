@@ -99,6 +99,12 @@
     <button class="btn btn-primary throw-btn" id="throw-btn">Halten &amp; loslassen</button>
   </section>
 
+  <!-- Aussichtsbank-HUD -->
+  <section id="view-hud" class="hud hidden">
+    <button class="btn btn-ghost back-btn" id="view-back">← Zum Traktor</button>
+    <p class="rest-title">Aussicht.</p>
+  </section>
+
   <!-- Fahr-HUD -->
   <section id="drive-hud" class="hud hidden">
     <button class="btn btn-ghost back-btn" id="back-btn">← Showroom</button>
@@ -110,9 +116,9 @@
       </div>
     </div>
     <div class="drive-help" id="drive-help">
-      <b>W/S</b> Gas · Bremse/Rückwärts&nbsp;&nbsp;<b>A/D</b> Knicklenkung&nbsp;&nbsp;<b>Leertaste</b> Bremse&nbsp;&nbsp;<b>H</b> Hupe&nbsp;&nbsp;<b>C</b> Kamera&nbsp;&nbsp;<b>L</b> Licht&nbsp;&nbsp;<b>E</b> am Weiher absteigen
+      <b>W/S</b> Gas · Bremse/Rückwärts&nbsp;&nbsp;<b>A/D</b> Knicklenkung&nbsp;&nbsp;<b>Leertaste</b> Bremse&nbsp;&nbsp;<b>H</b> Hupe&nbsp;&nbsp;<b>C</b> Kamera&nbsp;&nbsp;<b>L</b> Licht&nbsp;&nbsp;<b>E</b> absteigen (Weiher, Aussicht)
     </div>
-    <button class="btn btn-primary pond-btn hidden" id="pond-btn">🪨 Am Steg sitzen <kbd>E</kbd></button>
+    <button class="btn btn-primary pond-btn hidden" id="spot-btn"><span id="spot-label">Absteigen</span> <kbd>E</kbd></button>
     <div class="touch" id="touch">
       <div class="stick" id="stick"><div class="stick-knob" id="stick-knob"></div></div>
       <div class="pedals">

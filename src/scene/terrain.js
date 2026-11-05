@@ -13,9 +13,20 @@ export function pondE(x, z) {
   return Math.hypot(dx, dz) * (1 + 0.1 * noise2(x / 14 + 5.1, z / 14 - 2.3) + 0.04 * noise2(x / 5, z / 5));
 }
 
+// Aussichtsbank am Hang über dem Dorf (kleine ebene Terrasse für Bank und Traktor)
+export const VIEW = { x: -64, z: -145, park: { x: -53, z: -137 } };
+
+const VIEW_H = baseHeight(VIEW.x, VIEW.z);
 const H0 = rawHeight(0, 0);
 
 function rawHeight(x, z) {
+  // kleines ebenes Plätzchen nur unter der Bank: davor fällt der Hang frei ab, der Blick bleibt offen
+  const vd = Math.hypot(x - VIEW.x, z - VIEW.z);
+  const h = baseHeight(x, z);
+  return vd < 6 ? lerp(h, VIEW_H, smoothstep(6, 2.5, vd)) : h;
+}
+
+function baseHeight(x, z) {
   // Wiese: sanft ansteigend nach +Z, weiche Mulden
   let h = 0.045 * z + 1.7 * fbm(x / 75, z / 75, 3) + 0.35 * noise2(x / 17, z / 17);
   // Tal
@@ -62,10 +73,9 @@ export function normalAt(x, z, out = new THREE.Vector3()) {
 export const PATH_Z = [-115, 125];
 export function pathX(z) { return 15 + 9 * Math.sin(z / 34) + 3 * Math.sin(z / 13 + 1.3); }
 
-// Abzweig zum Weiher: Bézierkurve vom Hauptweg bis zum Platz am Steg, als Polylinie (~1 m)
+// Abzweige vom Hauptweg: Bézierkurven als Polylinien (~1 m)
 export const POND_PARK = { x: 101, z: 71 };
-export const BRANCH = (() => {
-  const z0 = 50, P = [[pathX(z0), z0], [48, 58], [74, 80], [POND_PARK.x, POND_PARK.z]];
+function branch(P) {
   const pts = [];
   const N = 110;
   for (let i = 0; i <= N; i++) {
@@ -76,11 +86,22 @@ export const BRANCH = (() => {
   let x0 = 1e9, x1 = -1e9, zz0 = 1e9, zz1 = -1e9;
   for (const [x, z] of pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); zz0 = Math.min(zz0, z); zz1 = Math.max(zz1, z); }
   return { pts, box: [x0 - 8, x1 + 8, zz0 - 8, zz1 + 8] };
-})();
+}
+export const BRANCHES = [
+  branch([[pathX(50), 50], [48, 58], [74, 80], [POND_PARK.x, POND_PARK.z]]),           // zum Weiher
+  branch([[pathX(-98), -98], [0, -118], [-30, -134], [VIEW.park.x - 4, VIEW.park.z]]), // zur Aussichtsbank
+];
+export const BRANCH = BRANCHES[0];
 function branchDist(x, z) {
-  const [x0, x1, z0, z1] = BRANCH.box;
-  if (x < x0 || x > x1 || z < z0 || z > z1) return 999;
-  const P = BRANCH.pts;
+  let best = 1e9;
+  for (const B of BRANCHES) {
+    const [x0, x1, z0, z1] = B.box;
+    if (x < x0 || x > x1 || z < z0 || z > z1) continue;
+    best = Math.min(best, polyDist(B.pts, x, z));
+  }
+  return best > 1e8 ? 999 : best;
+}
+function polyDist(P, x, z) {
   let best = 1e9;
   for (let i = 0; i < P.length - 1; i++) {
     const ax = P[i][0], az = P[i][1], bx = P[i + 1][0] - ax, bz = P[i + 1][1] - az;
@@ -293,7 +314,7 @@ export function createPath() {
   const main = [];
   for (let z = PATH_Z[0]; z <= PATH_Z[1]; z += 1) main.push([pathX(z), z]);
   ribbon(main);
-  ribbon(BRANCH.pts.slice(2), 6, 4);
+  for (const B of BRANCHES) ribbon(B.pts.slice(2), 6, 4);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));

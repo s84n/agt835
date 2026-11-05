@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { heightAt, forestMask, villageMask, pathDist, pondE } from './terrain.js';
+import { heightAt, forestMask, pathDist, pondE } from './terrain.js';
 import { TRACK_MAP_WORLD } from './tracks.js';
 import { seeded, fbm, noise2, smoothstep, hash2 } from './noise.js';
 import { leafTexture, logEndTexture, barkTexture } from './textures.js';
@@ -247,7 +247,7 @@ function makeOrchardTree(seed) {
   return { wood: woodGeo, crown: mergeGeometries(crown), leaves: lg };
 }
 
-export function createOrchard(quality) {
+export function createOrchard(quality, { extras = [], clear = [] } = {}) {
   const group = new THREE.Group();
   const obstacles = [];
   const rnd = seeded(1234);
@@ -262,6 +262,7 @@ export function createOrchard(quality) {
       if (r < 17) continue;                         // Bühne frei lassen
       if (pathDist(x, z) < 4.5) continue;           // Feldweg frei
       if (pondE(x, z) < 1.9) continue;              // Weiher und Platz am Steg frei
+      if (clear.some((c) => Math.hypot(x - c.x, z - c.z) < c.r)) continue; // Aussicht frei
       if (forestMask(x, z) > 0.3) continue;
       if (fbm(x / 90, z / 90, 2) > 0.35) continue;  // offene Wiesenflächen
       if (rnd() < 0.18) continue;
@@ -278,8 +279,9 @@ export function createOrchard(quality) {
   const leafMat = windMaterial({ vertexColors: true, map: leafMap, alphaTest: 0.45, side: THREE.DoubleSide }, 0.035, 1.8, { leaves: true });
   const leafLow = variants.map((v) => reduceLeaves(v.leaves));
   const q = new THREE.Quaternion(), sc = new THREE.Vector3(), p = new THREE.Vector3();
-  const entries = spots.map(([x, z], i) => {
-    const k = 0.85 + rnd() * 0.5;
+  for (const e of extras) spots.push([e.x, e.z, e.k]);
+  const entries = spots.map(([x, z, big], i) => {
+    const k = big || 0.85 + rnd() * 0.5;
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rnd() * Math.PI * 2);
     sc.set(k, k * (0.9 + rnd() * 0.25), k);
     p.set(x, heightAt(x, z) - 0.1, z);
@@ -329,7 +331,7 @@ function shadeByHeight(geo, y0, y1, base = 1) {
   });
 }
 
-function decidGeo(rnd) {
+export function decidGeo(rnd) {
   const parts = [];
   const trunk = new THREE.CylinderGeometry(0.07, 0.12, 0.9, 5).translate(0, 0.45, 0);
   { const t = trunk.toNonIndexed(); t.deleteAttribute('uv'); parts.push(setColor(t, (c) => c.setRGB(0.55, 0.42, 0.3))); }
@@ -406,74 +408,6 @@ export function createForest(quality) {
       return m;
     });
   });
-  return group;
-}
-
-// ---------- Dorf im Tal ----------
-function houseGeometry() {
-  const walls = colorize(new THREE.BoxGeometry(1, 0.62, 1).translate(0, 0.31, 0), '#efe8da');
-  const shape = new THREE.Shape();
-  shape.moveTo(-0.56, 0); shape.lineTo(0.56, 0); shape.lineTo(0, 0.42); shape.closePath();
-  const roof = new THREE.ExtrudeGeometry(shape, { depth: 1.1, bevelEnabled: false });
-  roof.translate(0, 0.62, -0.55);
-  const r = colorize(roof, '#a2452e');
-  return mergeGeometries([walls, r]);
-}
-
-export function createVillage() {
-  const rnd = seeded(555);
-  const geo = houseGeometry();
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
-  const list = [];
-  const cell = 15;
-  for (let x = -330; x < 160; x += cell) {
-    for (let z = -400; z < -170; z += cell) {
-      const jx = x + (rnd() - 0.5) * 8, jz = z + (rnd() - 0.5) * 8;
-      if (rnd() < villageMask(jx, jz) * 1.4) list.push([jx, jz]);
-    }
-  }
-  // Aussiedlerhöfe
-  for (let i = 0; i < 14; i++) list.push([(rnd() - 0.5) * 900, -200 - rnd() * 130]);
-  const im = new THREE.InstancedMesh(geo, mat, list.length + 1);
-  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
-  const roofTints = ['#ffffff', '#e8d4cc', '#c9b6b0', '#f2e2c8', '#d0d0d0'].map((c) => new THREE.Color(c));
-  list.forEach(([x, z], i) => {
-    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), (Math.round(rnd() * 3) * Math.PI) / 2 + (rnd() - 0.5) * 0.3 + 0.35);
-    s.set(8 + rnd() * 5, 9 + rnd() * 4, 10 + rnd() * 6);
-    p.set(x, heightAt(x, z) - 0.5, z);
-    im.setMatrixAt(i, m4.compose(p, q, s));
-    im.setColorAt(i, roofTints[Math.floor(rnd() * roofTints.length)]);
-  });
-  // Kirchturm
-  const cx = -95, cz = -282;
-  q.identity(); s.set(6, 34, 6); p.set(cx, heightAt(cx, cz) - 0.5, cz);
-  im.setMatrixAt(list.length, m4.compose(p, q, s));
-  im.setColorAt(list.length, new THREE.Color('#ffffff'));
-  im.computeBoundingSphere();
-
-  // Fenster: gehen abends Haus für Haus an (Schwelle je Haus, gesteuert über uNight)
-  const wins = [];
-  for (const [x, z] of [[-0.25, 0.506], [0.05, 0.506], [0.28, 0.506], [-0.2, -0.506], [0.22, -0.506]]) {
-    wins.push(new THREE.PlaneGeometry(0.1, 0.12).translate(x, 0.3, z));
-  }
-  for (const z of [-0.22, 0.2]) wins.push(new THREE.PlaneGeometry(0.1, 0.12).rotateY(Math.PI / 2).translate(0.506, 0.3, z));
-  for (const z of [0.0]) wins.push(new THREE.PlaneGeometry(0.1, 0.12).rotateY(Math.PI / 2).translate(-0.506, 0.3, z));
-  const winGeo = mergeGeometries(wins);
-  const thr = new Float32Array(list.length);
-  for (let i = 0; i < list.length; i++) thr[i] = 0.2 + rnd() * 0.75;
-  winGeo.setAttribute('aThresh', new THREE.InstancedBufferAttribute(thr, 1));
-  const winMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffc477').multiplyScalar(2.6), side: THREE.DoubleSide });
-  winMat.onBeforeCompile = (sh) => {
-    sh.uniforms.uNight = shared.uNight;
-    sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform float uNight; attribute float aThresh;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed *= step(aThresh, uNight);');
-  };
-  const windows = new THREE.InstancedMesh(winGeo, winMat, list.length);
-  for (let i = 0; i < list.length; i++) { im.getMatrixAt(i, m4); windows.setMatrixAt(i, m4); }
-  windows.computeBoundingSphere();
-  const group = new THREE.Group();
-  group.add(im, windows);
   return group;
 }
 
