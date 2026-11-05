@@ -442,27 +442,59 @@ export function createWoodpile(x, z, rotY = 0) {
 }
 
 // ---------- Gras ----------
-function bladeClump(rnd, blades = 5) {
+// Ein Büschel aus verschiedenen Halmtypen: feine lange Halme, kurze Untergräser,
+// etwas breitere Blätter und dünne Rispenhalme mit Samenständen. Halme laufen spitz zu.
+function bladeClump(rnd, blades = 12) {
   const parts = [];
+  const tipTint = [[1.0, 1.06, 0.8], [0.92, 1.06, 0.88], [0.86, 1.02, 0.95], [0.9, 1.08, 0.78], [1.1, 1.02, 0.72]];
   for (let b = 0; b < blades; b++) {
-    const h = 0.22 + rnd() * 0.26, w = 0.03 + rnd() * 0.02, segs = 3;
+    const kind = rnd();
+    let h, w, segs, bend;
+    if (kind < 0.45) { h = 0.3 + rnd() * 0.3; w = 0.008 + rnd() * 0.005; segs = 3; bend = 0.08 + rnd() * 0.3; }      // fein und lang
+    else if (kind < 0.75) { h = 0.12 + rnd() * 0.12; w = 0.008 + rnd() * 0.004; segs = 2; bend = 0.04 + rnd() * 0.1; } // kurzes Untergras
+    else if (kind < 0.92) { h = 0.22 + rnd() * 0.2; w = 0.013 + rnd() * 0.006; segs = 3; bend = 0.15 + rnd() * 0.35; } // breiteres Blatt, stärker gebogen
+    else { h = 0.5 + rnd() * 0.3; w = 0.0035; segs = 3; bend = 0.05 + rnd() * 0.12; }                                  // Rispenhalm
     const pos = [], col = [], idx = [];
-    const bend = 0.15 + rnd() * 0.25;
-    for (let i = 0; i <= segs; i++) {
+    // Farbe je Halm: leicht gelblicher, bläulicher oder satter Ton, Spitze heller
+    const tt = tipTint[Math.floor(rnd() * tipTint.length)];
+    const base = 0.55 + rnd() * 0.12;
+    const sway = (rnd() - 0.5) * 0.08; // seitliche Krümmung
+    const ring = (i) => {
       const t = i / segs;
-      const ww = w * (1 - t * 0.92);
-      const y = t * h, zOff = bend * t * t;
-      pos.push(-ww, y, zOff, ww, y, zOff);
-      const shade = 0.72 + t * 0.4;
-      col.push(shade, shade, shade, shade, shade, shade);
-      if (i < segs) { const k = i * 2; idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2); }
+      const ww = w * (1 - t * t * 0.85);
+      return { ww, y: t * h * (1 - bend * t * 0.35), z: bend * h * 1.6 * t * t, x: sway * t * t, t };
+    };
+    const shadeAt = (t) => { const s = base + t * 0.26; return [s * (1 + (tt[0] - 1) * t), s * (1 + (tt[1] - 1) * t), s * (1 + (tt[2] - 1) * t)]; };
+    for (let i = 0; i < segs; i++) {
+      const r = ring(i);
+      pos.push(r.x - r.ww, r.y, r.z, r.x + r.ww, r.y, r.z);
+      const c = shadeAt(r.t); col.push(...c, ...c);
+      if (i < segs - 1) { const k = i * 2; idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2); }
+    }
+    const top = ring(segs);
+    pos.push(top.x, top.y, top.z); col.push(...shadeAt(1));
+    const k = (segs - 1) * 2; idx.push(k, k + 1, k + 2);
+    // Samenstand am Rispenhalm: schmales, strohfarbenes Ährchen
+    if (kind >= 0.92) {
+      const n0 = pos.length / 3, sl = 0.05 + rnd() * 0.05, sw = 0.009;
+      const s0 = ring(segs - 1);
+      const ex = top.x - s0.x, ey = top.y - s0.y, ez = top.z - s0.z, el = Math.hypot(ex, ey, ez);
+      const ux = ex / el, uy = ey / el, uz = ez / el;
+      const sc = [0.95 + rnd() * 0.2, 0.85 + rnd() * 0.1, 0.5 + rnd() * 0.15];
+      pos.push(top.x - sw, top.y, top.z, top.x + sw, top.y, top.z,
+        top.x + ux * sl * 0.5 - sw, top.y + uy * sl * 0.5, top.z + uz * sl * 0.5,
+        top.x + ux * sl * 0.5 + sw, top.y + uy * sl * 0.5, top.z + uz * sl * 0.5,
+        top.x + ux * sl, top.y + uy * sl, top.z + uz * sl);
+      for (let q = 0; q < 5; q++) col.push(...sc);
+      idx.push(n0, n0 + 1, n0 + 2, n0 + 1, n0 + 3, n0 + 2, n0 + 2, n0 + 3, n0 + 4);
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
     g.setIndex(idx);
     g.rotateY(rnd() * Math.PI * 2);
-    g.translate((rnd() - 0.5) * 0.25, 0, (rnd() - 0.5) * 0.25);
+    const rr = Math.sqrt(rnd()) * 0.17, ra = rnd() * Math.PI * 2;
+    g.translate(Math.cos(ra) * rr, 0, Math.sin(ra) * rr);
     parts.push(g);
   }
   const m = mergeGeometries(parts);
@@ -473,22 +505,65 @@ function bladeClump(rnd, blades = 5) {
   return m;
 }
 
-function flowerClump(rnd) {
+// Wiesenblumen: Margerite, Klatschmohn, Kornblume, Löwenzahn, Rotklee, Wiesensalbei, Glockenblume, Schafgarbe
+const FLOWER_KINDS = ['margerite', 'mohn', 'kornblume', 'loewenzahn', 'klee', 'salbei', 'glocke', 'schafgarbe'];
+function flowerHead(kind, rnd, h) {
+  const at = (g) => g.translate(0, h, 0);
+  const petals = (n, len, wid, color, tilt = 0.15) => {
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const p = new THREE.PlaneGeometry(wid, len).translate(0, len / 2, 0).rotateX(-Math.PI / 2 + tilt).rotateY((i / n) * Math.PI * 2 + rnd() * 0.2);
+      out.push(colorize(p, color));
+    }
+    return out;
+  };
+  switch (kind) {
+    case 'margerite': return [...petals(12, 0.03, 0.009, '#fbfbf4'), colorize(new THREE.SphereGeometry(0.011, 6, 4).scale(1, 0.5, 1), '#f2c21b')].map(at);
+    case 'mohn': return [...petals(5, 0.032, 0.03, rnd() < 0.3 ? '#e8331c' : '#d81f14', 0.75), colorize(new THREE.SphereGeometry(0.008, 5, 3), '#26201a')].map(at);
+    case 'kornblume': return [...petals(9, 0.022, 0.011, '#3d6fe0', 0.45), colorize(new THREE.SphereGeometry(0.008, 5, 3), '#2c3f9e')].map(at);
+    case 'loewenzahn': return [colorize(new THREE.SphereGeometry(0.022, 7, 4).scale(1, 0.5, 1), '#ffcf0f'), ...petals(14, 0.02, 0.008, '#ffd626', 0.2)].map(at);
+    case 'klee': return [colorize(new THREE.SphereGeometry(0.017, 6, 5).scale(1, 1.15, 1), rnd() < 0.5 ? '#d1508c' : '#c23d7a')].map(at);
+    case 'salbei': {
+      const out = [];
+      for (let i = 0; i < 6; i++) out.push(colorize(new THREE.IcosahedronGeometry(0.011 - i * 0.0012, 0).scale(1, 0.7, 1).translate(0, h - 0.07 + i * 0.016, 0), '#6a43c9'));
+      return out;
+    }
+    case 'glocke': {
+      const out = [];
+      for (let i = 0; i < 3; i++) {
+        const y = h - i * 0.035;
+        out.push(colorize(new THREE.ConeGeometry(0.014, 0.024, 6, 1, true).rotateZ(0.5 + rnd() * 0.4).rotateY(i * 2.1).translate(0, y - 0.01, 0), '#9a7be6'));
+      }
+      return out;
+    }
+    default: { // Schafgarbe: flache weiße Dolde
+      const out = [];
+      for (let i = 0; i < 9; i++) {
+        const r = Math.sqrt(rnd()) * 0.026, a = rnd() * Math.PI * 2;
+        out.push(colorize(new THREE.SphereGeometry(0.008, 4, 3).scale(1, 0.6, 1).translate(Math.cos(a) * r, h + rnd() * 0.004, Math.sin(a) * r), '#f6f1e6'));
+      }
+      return out;
+    }
+  }
+}
+
+function flowerClump(rnd, kinds) {
   const parts = [];
-  for (let b = 0; b < 3; b++) {
-    const h = 0.3 + rnd() * 0.25;
-    const stem = new THREE.CylinderGeometry(0.008, 0.01, h, 3).translate(0, h / 2, 0);
-    const stemC = colorize(stem, '#5b7a2c');
-    const head = new THREE.IcosahedronGeometry(0.05 + rnd() * 0.03, 0).scale(1, 0.45, 1).translate(0, h, 0);
-    const headC = colorize(head, '#ffffff');
-    const g = mergeGeometries([stemC, headC]);
-    g.translate((rnd() - 0.5) * 0.4, 0, (rnd() - 0.5) * 0.4);
+  const n = 3 + Math.floor(rnd() * 3);
+  for (let b = 0; b < n; b++) {
+    const kind = kinds[Math.floor(rnd() * kinds.length)];
+    const h = (kind === 'klee' || kind === 'loewenzahn' ? 0.16 : kind === 'salbei' ? 0.42 : 0.3) + rnd() * 0.18;
+    const lean = (rnd() - 0.5) * 0.25;
+    const stem = new THREE.CylinderGeometry(0.0025, 0.0035, h, 3).translate(0, h / 2, 0);
+    const g = mergeGeometries([colorize(stem, '#557a2a'), ...flowerHead(kind, rnd, h)]);
+    g.rotateZ(lean).rotateY(rnd() * Math.PI * 2);
+    g.translate((rnd() - 0.5) * 0.35, 0, (rnd() - 0.5) * 0.35);
     parts.push(g);
   }
   const m = mergeGeometries(parts);
-  const n = m.attributes.position.count;
-  const nrm = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) nrm[i * 3 + 1] = 1;
+  const cnt = m.attributes.position.count;
+  const nrm = new Float32Array(cnt * 3);
+  for (let i = 0; i < cnt; i++) nrm[i * 3 + 1] = 1;
   m.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
   return m;
 }
@@ -540,6 +615,11 @@ function grassMaterial(fadeStart, fadeEnd, swayAmt) {
         gl_Position = projectionMatrix * mvPosition;
       `)
       .replace('#include <worldpos_vertex>', `vec4 worldPosition = vec4(transformed, 1.0);`);
+    // Halme haben eine nach oben zeigende Normale: Rückseiten nicht umdrehen, sonst werden sie schwarz
+    sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', `
+        float faceDirection = 1.0;
+        vec3 normal = normalize(vNormal);
+        vec3 nonPerturbedNormal = normal;`);
   };
   return m;
 }
@@ -554,9 +634,15 @@ export class Grass {
     this.tile = 16;
     this.R = quality.grassRadius;
     this.perTile = quality.grassPerTile;
-    this.flowerCap = Math.ceil(this.perTile * 0.2);
-    this.clumps = [bladeClump(rnd, 7), bladeClump(rnd, 6), bladeClump(rnd, 8)];
-    this.flower = flowerClump(rnd);
+    this.flowerCap = Math.ceil(this.perTile * 0.25);
+    this.clumps = [16, 18, 20, 17, 19, 18].map((n) => bladeClump(rnd, n));
+    // jede Kachel bekommt eine eigene Blumenmischung, so wechseln die Farben über die Wiese
+    const mixes = [
+      ['margerite', 'mohn', 'kornblume'], ['loewenzahn', 'klee', 'margerite'], ['salbei', 'margerite', 'schafgarbe'],
+      ['mohn', 'kornblume', 'glocke'], ['klee', 'salbei', 'loewenzahn'], ['margerite', 'glocke', 'schafgarbe', 'mohn'],
+      FLOWER_KINDS,
+    ];
+    this.flowers = mixes.map((k) => flowerClump(rnd, k));
     this.mat = grassMaterial(this.R * 0.55, this.R * 0.95, 0.09);
     this.fmat = grassMaterial(this.R * 0.45, this.R * 0.8, 0.06);
     this.reach = this.R + this.tile * 0.75;
@@ -591,7 +677,7 @@ export class Grass {
     };
     return { key: null, cx: 0, cz: 0, n: 0, fn: 0,
       grass: mk(this.clumps[k % this.clumps.length], this.mat, this.perTile),
-      flowers: mk(this.flower, this.fmat, this.flowerCap) };
+      flowers: mk(this.flowers[k % this.flowers.length], this.fmat, this.flowerCap) };
   }
 
   fill(slot, ix, iz) {
@@ -616,14 +702,15 @@ export class Grass {
       if (pd <= 0.35) scale *= 0.55;
       if (pe < 1.5) scale *= 1.1 + (1.5 - pe) * 0.6; // am Ufer üppiger
       const dryness = smoothstep(0.0, 0.9, fbm(x / 60 + 3, z / 60, 2) * 0.5 + 0.5 + (r3 - 0.5) * 0.35);
-      c.copy(green).lerp(dry, dryness * 0.6 * (pe < 1.6 ? 0.3 : 1)).lerp(dark, r4 * 0.35);
+      c.copy(green).lerp(dry, dryness * (r3 < 0.12 ? 0.75 : 0.3) * (pe < 1.6 ? 0.3 : 1)).lerp(dark, r4 * 0.5);
       go[n * 4] = x; go[n * 4 + 1] = y - 0.02; go[n * 4 + 2] = z; go[n * 4 + 3] = Math.floor(scale * 100) + r5 * 0.999;
-      gt[n * 3] = c.r * 1.12; gt[n * 3 + 1] = c.g * 1.12; gt[n * 3 + 2] = c.b * 1.12;
+      gt[n * 3] = c.r; gt[n * 3 + 1] = c.g * 1.05; gt[n * 3 + 2] = c.b;
       n++;
       // Wiesenblumen in Nestern
-      if (fn < this.flowerCap && noise2(x / 9, z / 9) > 0.45 && r6 < 0.18) {
-        fo[fn * 4] = x + 0.2; fo[fn * 4 + 1] = y - 0.02; fo[fn * 4 + 2] = z + 0.1; fo[fn * 4 + 3] = Math.floor((0.8 + r7 * 0.5) * 100) + r5 * 0.999;
-        ft[fn * 3] = 1; ft[fn * 3 + 1] = 1; ft[fn * 3 + 2] = r7 < 0.15 ? 0.6 : 1;
+      const nest = noise2(x / 9, z / 9);
+      if (fn < this.flowerCap && ((nest > 0.32 && r6 < 0.22) || r6 < 0.015)) {
+        fo[fn * 4] = x + 0.2; fo[fn * 4 + 1] = y - 0.02; fo[fn * 4 + 2] = z + 0.1; fo[fn * 4 + 3] = Math.floor((1.25 + r7 * 0.55) * 100) + r5 * 0.999;
+        const fb = 0.92 + r7 * 0.16; ft[fn * 3] = fb; ft[fn * 3 + 1] = fb; ft[fn * 3 + 2] = fb;
         fn++;
       }
     }
